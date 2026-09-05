@@ -1,9 +1,9 @@
 """Presentation helpers for the Agent 9 Gradio demo.
 
 These helpers translate workflow and evaluation objects into display-safe views.
-The business presenters explain the workflow in plain English, while the technical
-presenters preserve node, review, and audit evidence. Workflow context is never
-copied into the audit timeline.
+The business presenters explain the fictional wealth-onboarding workflow in plain
+English, while the technical presenters preserve node, review, and audit evidence.
+Workflow context is never copied into the audit timeline.
 """
 
 from __future__ import annotations
@@ -30,16 +30,24 @@ METRIC_HEADERS = ["Metric", "Value"]
 CASE_HEADERS = ["Case", "Category", "Passed", "Expected", "Observed"]
 
 BUSINESS_STEPS = [
-    ("validate_request", "Check the request", "Make sure the request is complete and usable."),
-    ("classify_request", "Understand the request", "Place the request into an approved category."),
-    ("policy_check", "Apply business policy", "Confirm the request is allowed to continue."),
-    ("perform_automated_task", "Do the work", "Perform the simulated service action with bounded retries."),
-    ("verify_result", "Verify the result", "Check that the automated action actually succeeded."),
-    ("risk_gate", "Assess risk", "Choose only between the approved low-risk and high-risk paths."),
-    ("low_risk_finalize", "Finish automatically", "Complete routine work without unnecessary human review."),
-    ("human_review", "Ask a person", "Pause high-risk work until an explicit human decision is recorded."),
-    ("high_risk_finalize", "Finish after approval", "Continue high-risk work only after a person approves it."),
+    ("validate_intake", "Check the household intake", "Make sure the fictional intake is complete and usable."),
+    ("ai_intake_organizer", "🤖 AI Intake Organizer", "Organize synthetic notes into a bounded household profile and summary."),
+    ("document_check", "Check onboarding documents", "Record whether the fictional document set is complete."),
+    ("policy_check", "Apply onboarding rules", "Identify deterministic exception reasons that require extra review."),
+    ("create_onboarding_package", "Prepare the onboarding package", "Create a simulated package with bounded retry protection."),
+    ("verify_onboarding_package", "Verify the package", "Confirm the simulated onboarding package was prepared correctly."),
+    ("review_gate", "Choose the review path", "Route only between the approved standard path and human-review path."),
+    ("onboarding_ready", "Standard package ready", "Mark a straightforward fictional household ready for advisor review."),
+    ("human_review", "Operations / compliance review", "Pause exception cases until an explicit person decides."),
+    ("reviewed_onboarding", "Ready after human review", "Continue only after an exception case is explicitly approved."),
 ]
+
+_EXCEPTION_LABELS = {
+    "MISSING_DOCUMENTS": "missing onboarding documents",
+    "IDENTITY_REVIEW_REQUIRED": "identity information needs review",
+    "COMPLEX_RELATIONSHIP": "the relationship is marked complex",
+    "SPECIAL_STRUCTURE": "the household uses a special structure",
+}
 
 
 def run_summary(run: WorkflowRun) -> str:
@@ -59,82 +67,82 @@ def run_summary(run: WorkflowRun) -> str:
     ]
 
     if run.status is WorkflowStatus.WAITING_FOR_HUMAN:
-        lines.append("\n**Action required:** submit an explicit human decision before the workflow can continue.")
+        lines.append("\n**Action required:** an explicit operations/compliance decision is required before the workflow can continue.")
     elif run.status is WorkflowStatus.REJECTED:
-        lines.append("\nThe business process was rejected by a human reviewer; this is not a technical failure.")
+        lines.append("\nThe fictional onboarding process was rejected by a human reviewer; this is not a technical failure.")
     elif run.status is WorkflowStatus.FAILED:
-        lines.append("\nThe workflow stopped safely after a controlled failure.")
+        lines.append("\nThe onboarding workflow stopped safely after a controlled failure.")
 
     return "\n".join(lines)
 
 
 def business_outcome_html(run: WorkflowRun) -> str:
-    """Explain the current business outcome without requiring workflow terminology."""
+    """Explain the current onboarding outcome without requiring workflow terminology."""
 
-    risk_route = _risk_route(run)
-    attempts = _task_attempts(run)
+    review_route = _review_route(run)
+    attempts = _package_attempts(run)
 
     if run.status is WorkflowStatus.WAITING_FOR_HUMAN:
         tone = "waiting"
         eyebrow = "HUMAN CHECKPOINT"
-        title = "A person needs to decide before this can continue"
+        title = "An onboarding exception needs a person"
         body = (
-            "The request crossed the workflow's risk threshold. Automation has paused "
-            "and cannot move forward until a person explicitly approves, rejects, or "
-            "re-opens the review."
+            "The routine preparation steps are complete, but one or more deterministic "
+            "exception rules require operations or compliance review. Automation is paused "
+            "and cannot mark the package ready on its own."
         )
-        takeaway = "Pattern shown: automate routine work, but keep people in control of high-risk decisions."
+        takeaway = "Pattern shown: AI can organize intake, but people retain authority over exception decisions."
     elif run.status is WorkflowStatus.REJECTED:
         tone = "rejected"
         eyebrow = "BUSINESS DECISION"
-        title = "The reviewer stopped the request"
+        title = "The reviewer stopped this onboarding case"
         body = (
-            "A person rejected the high-risk request. The workflow ended intentionally; "
-            "nothing crashed and downstream work did not continue."
+            "A person rejected the fictional exception case. The workflow ended intentionally; "
+            "nothing crashed and the reviewed-ready step did not run."
         )
-        takeaway = "Pattern shown: a valid business rejection is different from a technical failure."
+        takeaway = "Pattern shown: a valid human business decision is different from a technical failure."
     elif run.status is WorkflowStatus.FAILED:
         tone = "failed"
         eyebrow = "SAFE FAILURE"
-        title = "The workflow stopped safely"
+        title = "The onboarding workflow stopped safely"
         body = (
-            "A permanent problem occurred. Instead of continuing with uncertain state, "
-            "the workflow contained the failure and prevented later steps from running."
+            "A permanent simulated dependency problem occurred. Instead of continuing with an "
+            "uncertain package, the workflow contained the failure and blocked later steps."
         )
-        takeaway = "Pattern shown: failures are contained instead of cascading through the process."
-    elif run.status is WorkflowStatus.COMPLETED and risk_route == "HIGH_RISK":
+        takeaway = "Pattern shown: failures are contained instead of cascading through an onboarding process."
+    elif run.status is WorkflowStatus.COMPLETED and review_route == "REVIEW_REQUIRED":
         tone = "success"
         eyebrow = "HUMAN-GUIDED COMPLETION"
-        title = "Completed after a person approved the high-risk request"
+        title = "The onboarding package is ready after human review"
         body = (
-            "Automation handled the routine steps, paused at the risk gate, and resumed "
-            "only after an explicit human approval."
+            "Automation prepared and verified the fictional package, paused at the exception gate, "
+            "and resumed only after an explicit human approval."
         )
-        takeaway = "Pattern shown: automation handles the process; a person retains final authority when risk is high."
+        takeaway = "Pattern shown: automation handles the process while a person retains authority over exceptions."
     elif run.status is WorkflowStatus.COMPLETED and attempts > 1:
         tone = "success"
         eyebrow = "AUTOMATIC RECOVERY"
-        title = "A temporary problem happened — and the workflow recovered"
+        title = "A temporary onboarding-service problem occurred — and recovered"
         body = (
-            f"The automated task needed {attempts} attempts. The retry policy handled the "
-            "temporary interruption within its limit, and the request still completed safely."
+            f"Package preparation needed {attempts} attempts. The bounded retry policy handled "
+            "the temporary interruption and the fictional onboarding package still reached the standard ready path."
         )
-        takeaway = "Pattern shown: temporary failures can recover automatically without creating an infinite retry loop."
+        takeaway = "Pattern shown: temporary operational failures can recover without an endless retry loop."
     elif run.status is WorkflowStatus.COMPLETED:
         tone = "success"
-        eyebrow = "ROUTINE AUTOMATION"
-        title = "Completed automatically — no human review was needed"
+        eyebrow = "STRAIGHTFORWARD ONBOARDING"
+        title = "The fictional household package is ready for advisor review"
         body = (
-            "The request stayed within policy, the work was verified, and the risk check "
-            "allowed the workflow to finish on the automatic path."
+            "The intake was valid, the package was prepared and verified, and no deterministic "
+            "exception rule required an additional operations/compliance checkpoint."
         )
-        takeaway = "Pattern shown: people are not pulled into routine work when policy says automation is safe."
+        takeaway = "Pattern shown: routine preparation can move automatically while consequential exceptions stay human-controlled."
     else:
         tone = "neutral"
         eyebrow = "WORKFLOW IN PROGRESS"
-        title = "The workflow is processing the request"
-        body = "Application code is controlling the order of work, state changes, and allowed next steps."
-        takeaway = "Pattern shown: the workflow engine controls the process rather than letting a model improvise the sequence."
+        title = "The onboarding workflow is processing the household"
+        body = "Application code is controlling the order of work, state changes, and approved next steps."
+        takeaway = "Pattern shown: AI assists inside a bounded step; it does not improvise the onboarding process."
 
     return (
         f'<div class="business-outcome outcome-{tone}">'
@@ -147,11 +155,10 @@ def business_outcome_html(run: WorkflowRun) -> str:
 
 
 def business_journey_html(run: WorkflowRun) -> str:
-    """Render the technical node state as an understandable business journey."""
+    """Render technical node state as an understandable onboarding journey."""
 
     cards: list[str] = []
     for node_id, title, description in BUSINESS_STEPS:
-        node = run.node_runs.get(node_id)
         icon, state_label, tone = _friendly_node_state(run, node_id)
         detail = _friendly_node_detail(run, node_id)
         cards.append(
@@ -167,7 +174,7 @@ def business_journey_html(run: WorkflowRun) -> str:
     return (
         '<div class="journey-wrap">'
         '<div class="journey-heading">What happened, step by step</div>'
-        '<div class="journey-subheading">The two finish paths are deliberate: routine work can auto-finish; high-risk work must go through a person.</div>'
+        '<div class="journey-subheading">The AI step interprets intake only. Deterministic rules decide whether the fictional household stays on the standard path or pauses for a person.</div>'
         f'<div class="journey-grid">{"".join(cards)}</div>'
         "</div>"
     )
@@ -266,16 +273,16 @@ def run_bundle(run: WorkflowRun) -> tuple[
     )
 
 
-def _risk_route(run: WorkflowRun) -> str | None:
-    node = run.node_runs.get("risk_gate")
+def _review_route(run: WorkflowRun) -> str | None:
+    node = run.node_runs.get("review_gate")
     if node is None or not isinstance(node.output, dict):
         return None
     route = node.output.get("route")
     return str(route) if route is not None else None
 
 
-def _task_attempts(run: WorkflowRun) -> int:
-    node = run.node_runs.get("perform_automated_task")
+def _package_attempts(run: WorkflowRun) -> int:
+    node = run.node_runs.get("create_onboarding_package")
     return node.attempt if node is not None else 0
 
 
@@ -299,7 +306,7 @@ def _friendly_node_state(run: WorkflowRun, node_id: str) -> tuple[str, str, str]
                 return "✓", "Approved by a person", "done"
             if decision == "REJECT":
                 return "■", "Rejected by a person", "rejected"
-        if node_id == "perform_automated_task" and node.attempt > 1:
+        if node_id == "create_onboarding_package" and node.attempt > 1:
             return "↻", f"Recovered on attempt {node.attempt}", "done"
         return "✓", "Done", "done"
     if status == "WAITING_FOR_HUMAN":
@@ -320,37 +327,48 @@ def _friendly_node_detail(run: WorkflowRun, node_id: str) -> str | None:
     if node is None:
         return None
 
-    if node_id == "perform_automated_task" and node.status.value == "COMPLETED":
-        if node.attempt > 1:
-            return f"A temporary problem occurred, but the bounded retry policy recovered in {node.attempt} attempts."
-        return "The simulated business action completed on the first attempt."
+    if node_id == "ai_intake_organizer" and isinstance(node.output, dict):
+        source = node.output.get("source")
+        category = node.output.get("profile_category")
+        if source == "MODEL_ASSISTED":
+            return f"A live bounded model organized the intake and proposed {category}; it did not receive routing or approval controls."
+        if source == "DETERMINISTIC_FALLBACK":
+            return f"This is the AI-capable boundary. The public demo used the deterministic fallback and produced {category}; a live model can be connected without changing workflow control."
 
-    if node_id == "risk_gate" and isinstance(node.output, dict):
+    if node_id == "create_onboarding_package" and node.status.value == "COMPLETED":
+        if node.attempt > 1:
+            return f"A temporary service problem occurred, but the bounded retry policy recovered in {node.attempt} attempts."
+        return "The fictional onboarding package was prepared on the first attempt."
+
+    if node_id == "review_gate" and isinstance(node.output, dict):
         route = node.output.get("route")
-        if route == "HIGH_RISK":
-            return "The request was classified as high risk, so the automatic finish path was blocked."
-        if route == "LOW_RISK":
-            return "The request stayed within the automatic path, so no human approval was required."
+        reasons = node.output.get("exception_reasons") or []
+        if route == "REVIEW_REQUIRED":
+            friendly = [_EXCEPTION_LABELS.get(str(reason), str(reason).lower()) for reason in reasons]
+            reason_text = ", ".join(friendly) if friendly else "an onboarding exception"
+            return f"Deterministic rules found {reason_text}, so the standard-ready path was blocked."
+        if route == "STANDARD_PATH":
+            return "Deterministic rules found no exception requiring the extra human-review path."
 
     if node_id == "human_review":
         decision = _latest_review_decision(run)
         if node.status.value == "WAITING_FOR_HUMAN":
-            return "The workflow is deliberately paused and cannot continue on its own."
+            return "The workflow is deliberately paused and cannot mark the package ready on its own."
         if decision == "APPROVE":
-            return "A person explicitly approved the request, allowing the workflow to resume."
+            return "A person explicitly approved the exception case, allowing the workflow to resume."
         if decision == "REJECT":
-            return "A person explicitly rejected the request, ending the business process."
+            return "A person explicitly rejected the exception case, ending the fictional onboarding process."
         if decision == "RETRY":
             return "A person requested another review cycle without replaying upstream work."
 
-    if node_id == "low_risk_finalize" and node.status.value == "COMPLETED":
-        return "Routine work finished automatically under the approved policy path."
-    if node_id == "high_risk_finalize" and node.status.value == "COMPLETED":
-        return "High-risk work finished only after explicit human approval."
+    if node_id == "onboarding_ready" and node.status.value == "COMPLETED":
+        return "The straightforward fictional package is ready for the next advisor-facing step; no account is actually opened."
+    if node_id == "reviewed_onboarding" and node.status.value == "COMPLETED":
+        return "The exception package is ready only because a person explicitly approved it; no account is actually opened."
     if node.status.value == "SKIPPED":
         return "This step belongs to the other approved branch, so it was intentionally skipped."
     if node.status.value == "FAILED":
-        return "The workflow contained the problem here and did not continue into later work."
+        return "The workflow contained the problem here and did not continue into later onboarding work."
     return None
 
 
