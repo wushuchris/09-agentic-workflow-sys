@@ -16,16 +16,14 @@ def test_demo_workflow_is_structurally_valid() -> None:
 
     assert validate_workflow(workflow) is None
     assert workflow.workflow_id == "wealth-household-onboarding"
+    assert workflow.version == "1.1"
     assert len(workflow.nodes) == 10
 
 
 def test_straightforward_household_reaches_standard_ready_path() -> None:
-    workflow = build_onboarding_workflow()
-    registry = build_onboarding_registry()
-
     run = execute_workflow(
-        workflow,
-        registry,
+        build_onboarding_workflow(),
+        build_onboarding_registry(),
         context=example_onboarding(household_id="HH-STANDARD"),
         run_id="demo-standard",
         state_store=InMemoryStateStore(),
@@ -57,10 +55,50 @@ def test_ai_capable_node_uses_deterministic_fallback_without_model() -> None:
         state_store=InMemoryStateStore(),
     )
 
-    output = run.node_runs["ai_intake_organizer"].output
-    assert output["source"] == "DETERMINISTIC_FALLBACK"
-    assert output["profile_category"] == "STANDARD_HOUSEHOLD"
-    assert "synthetic" in output["summary"].lower()
+    ai_output = run.node_runs["ai_intake_organizer"].output
+    package_output = run.node_runs["create_onboarding_package"].output
+
+    assert ai_output["source"] == "DETERMINISTIC_FALLBACK"
+    assert ai_output["profile_category"] == "STANDARD_HOUSEHOLD"
+    assert "synthetic" in ai_output["summary"].lower()
+    assert package_output["ai_profile_category"] == ai_output["profile_category"]
+    assert package_output["ai_intake_summary"] == ai_output["summary"]
+    assert package_output["ai_source"] == "DETERMINISTIC_FALLBACK"
+    assert run.node_runs["verify_onboarding_package"].output["ai_summary_included"] is True
+
+
+def test_live_ai_work_product_is_used_but_does_not_control_route() -> None:
+    def fake_model(prompt: str) -> str:
+        return (
+            '{"profile_category":"COMPLEX_HOUSEHOLD",'
+            '"summary":"AI sees nuance in the fictional notes."}'
+        )
+
+    run = execute_workflow(
+        build_onboarding_workflow(),
+        build_onboarding_registry(onboarding_model=fake_model, model_label="example/model"),
+        context=example_onboarding(
+            household_id="HH-AI-NONAUTHORITATIVE",
+            household_type="JOINT",
+            documents_complete=True,
+            identity_status="VERIFIED",
+            relationship_complexity="STANDARD",
+        ),
+        run_id="demo-ai-nonauthoritative",
+        state_store=InMemoryStateStore(),
+    )
+
+    ai_output = run.node_runs["ai_intake_organizer"].output
+    package_output = run.node_runs["create_onboarding_package"].output
+
+    assert ai_output["source"] == "MODEL_ASSISTED"
+    assert ai_output["profile_category"] == "COMPLEX_HOUSEHOLD"
+    assert ai_output["model_id"] == "example/model"
+    assert package_output["ai_profile_category"] == "COMPLEX_HOUSEHOLD"
+    assert run.node_runs["review_gate"].output == {
+        "route": "STANDARD_PATH",
+        "exception_reasons": [],
+    }
 
 
 def test_transient_failure_retries_once_then_recovers() -> None:
@@ -80,6 +118,7 @@ def test_transient_failure_retries_once_then_recovers() -> None:
     assert package.status is NodeStatus.COMPLETED
     assert package.attempt == 2
     assert package.output["service_attempt"] == 2
+    assert package.output["ai_intake_summary"]
     assert EventType.RETRY_SCHEDULED in [event.event_type for event in run.events]
 
 
@@ -222,7 +261,7 @@ def test_permanent_failure_is_not_retried_even_though_node_allows_retries() -> N
     assert run.node_runs["verify_onboarding_package"].status is NodeStatus.PENDING
 
 
-def test_audit_log_does_not_copy_onboarding_notes() -> None:
+def test_audit_log_does_not_copy_onboarding_notes_or_ai_summary() -> None:
     onboarding = example_onboarding(household_id="HH-PRIVACY")
     onboarding["onboarding_notes"] = "Synthetic but intentionally private-looking demo text."
 
@@ -235,4 +274,6 @@ def test_audit_log_does_not_copy_onboarding_notes() -> None:
     )
 
     audit_text = repr([event.details for event in run.events])
+    ai_summary = run.node_runs["ai_intake_organizer"].output["summary"]
     assert "Synthetic but intentionally private-looking demo text." not in audit_text
+    assert ai_summary not in audit_text
