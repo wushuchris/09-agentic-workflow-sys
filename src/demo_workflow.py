@@ -78,7 +78,7 @@ def build_onboarding_workflow() -> WorkflowDefinition:
                 name="Review Gate",
                 node_type=NodeType.DECISION,
                 handler="review_gate",
-                depends_on=["verify_onboarding_package"],
+                depends_on=["verify_onboarding_package", "policy_check"],
                 routes={
                     "STANDARD_PATH": "onboarding_ready",
                     "REVIEW_REQUIRED": "human_review",
@@ -210,24 +210,24 @@ def build_onboarding_registry(
         }
 
     def document_check(payload: dict[str, Any]) -> dict[str, Any]:
-        intake = payload["dependencies"]["validate_intake"]
+        documents_complete = payload["context"]["documents_complete"]
         return {
-            "documents_complete": intake["documents_complete"],
-            "status": "COMPLETE" if intake["documents_complete"] else "MISSING_ITEMS",
+            "documents_complete": documents_complete,
+            "status": "COMPLETE" if documents_complete else "MISSING_ITEMS",
         }
 
     def policy_check(payload: dict[str, Any]) -> dict[str, Any]:
-        intake = payload["dependencies"]["validate_intake"]
+        context = payload["context"]
         documents = payload["dependencies"]["document_check"]
         exceptions: list[str] = []
 
         if not documents["documents_complete"]:
             exceptions.append("MISSING_DOCUMENTS")
-        if intake["identity_status"] == "REVIEW_REQUIRED":
+        if str(context["identity_status"]).strip().upper() == "REVIEW_REQUIRED":
             exceptions.append("IDENTITY_REVIEW_REQUIRED")
-        if intake["relationship_complexity"] == "COMPLEX":
+        if str(context["relationship_complexity"]).strip().upper() == "COMPLEX":
             exceptions.append("COMPLEX_RELATIONSHIP")
-        if intake["household_type"] in SPECIAL_STRUCTURE_TYPES:
+        if str(context["household_type"]).strip().upper() in SPECIAL_STRUCTURE_TYPES:
             exceptions.append("SPECIAL_STRUCTURE")
 
         return {
