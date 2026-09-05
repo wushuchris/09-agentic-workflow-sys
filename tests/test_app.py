@@ -20,20 +20,21 @@ def test_gradio_app_builds_as_blocks() -> None:
     assert isinstance(app.demo, gr.Blocks)
 
 
-def test_one_click_routine_story_explains_automatic_completion(
+def test_one_click_standard_household_explains_ready_path(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    store = SQLiteStateStore(tmp_path / "routine-story.db")
+    store = SQLiteStateStore(tmp_path / "standard-story.db")
     monkeypatch.setattr(app, "STATE_STORE", store)
 
-    bundle = app.run_story_ui("Routine request — finishes automatically")
+    bundle = app.run_story_ui("Straightforward household — package becomes ready")
     run = store.load(bundle[1])
 
     assert run.status is WorkflowStatus.COMPLETED
-    assert "Completed automatically" in bundle[6]
+    assert "ready for advisor review" in bundle[6].lower()
     assert "What happened, step by step" in bundle[7]
-    assert "Finish automatically" in bundle[7]
+    assert "AI Intake Organizer" in bundle[7]
+    assert "Standard package ready" in bundle[7]
 
 
 def test_one_click_retry_story_explains_automatic_recovery(
@@ -43,12 +44,12 @@ def test_one_click_retry_story_explains_automatic_recovery(
     store = SQLiteStateStore(tmp_path / "retry-story.db")
     monkeypatch.setattr(app, "STATE_STORE", store)
 
-    bundle = app.run_story_ui("Temporary problem — retries once and recovers")
+    bundle = app.run_story_ui("Temporary service problem — retries and recovers")
     run = store.load(bundle[1])
 
     assert run.status is WorkflowStatus.COMPLETED
-    assert run.node_runs["perform_automated_task"].attempt == 2
-    assert "temporary problem" in bundle[6].lower()
+    assert run.node_runs["create_onboarding_package"].attempt == 2
+    assert "temporary onboarding-service problem" in bundle[6].lower()
     assert "Recovered on attempt 2" in bundle[7]
 
 
@@ -60,12 +61,12 @@ def test_run_and_refresh_callbacks_use_persisted_sqlite_state(
     monkeypatch.setattr(app, "STATE_STORE", store)
 
     bundle = app.run_request_ui(
-        "UI-CALLBACK-NORMAL",
-        "ACCESS",
-        "Provision synthetic access for a fictional demo user.",
-        "NORMAL",
-        "LOW",
-        125.0,
+        "HH-CALLBACK-STANDARD",
+        "JOINT",
+        "Synthetic household seeking a standard advisory relationship.",
+        True,
+        "VERIFIED",
+        "STANDARD",
         "NONE",
     )
     run_id = bundle[1]
@@ -82,7 +83,7 @@ def test_run_and_refresh_callbacks_use_persisted_sqlite_state(
     assert refreshed[7] == bundle[7]
 
 
-def test_high_risk_callback_pauses_then_approves_without_replaying_upstream(
+def test_exception_callback_pauses_then_approves_without_replaying_upstream(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -90,33 +91,33 @@ def test_high_risk_callback_pauses_then_approves_without_replaying_upstream(
     monkeypatch.setattr(app, "STATE_STORE", store)
 
     paused_bundle = app.run_request_ui(
-        "UI-CALLBACK-HIGH",
-        "ACCESS",
-        "Provision synthetic access for a fictional demo user.",
-        "HIGH",
-        "HIGH",
-        1_500.0,
+        "HH-CALLBACK-EXCEPTION",
+        "TRUST",
+        "Synthetic trust household requiring additional review.",
+        True,
+        "VERIFIED",
+        "COMPLEX",
         "NONE",
     )
     run_id = paused_bundle[1]
     paused = store.load(run_id)
 
     assert paused.status is WorkflowStatus.WAITING_FOR_HUMAN
-    assert paused.node_runs["validate_request"].attempt == 1
-    assert paused.node_runs["risk_gate"].attempt == 1
+    assert paused.node_runs["validate_intake"].attempt == 1
+    assert paused.node_runs["review_gate"].attempt == 1
     assert len(paused.human_reviews) == 1
-    assert "A person needs to decide" in paused_bundle[6]
+    assert "needs a person" in paused_bundle[6]
     assert "Waiting for a person" in paused_bundle[7]
 
     completed_bundle = app.submit_human_decision_ui(run_id, "APPROVE")
     completed = store.load(run_id)
 
     assert completed.status is WorkflowStatus.COMPLETED
-    assert completed.node_runs["validate_request"].attempt == 1
-    assert completed.node_runs["risk_gate"].attempt == 1
-    assert completed.node_runs["high_risk_finalize"].attempt == 1
+    assert completed.node_runs["validate_intake"].attempt == 1
+    assert completed.node_runs["review_gate"].attempt == 1
+    assert completed.node_runs["reviewed_onboarding"].attempt == 1
     assert "COMPLETED" in completed_bundle[0]
-    assert "Completed after a person approved" in completed_bundle[6]
+    assert "ready after human review" in completed_bundle[6].lower()
     assert "Approved by a person" in completed_bundle[7]
 
 
@@ -137,7 +138,7 @@ def test_missing_run_id_returns_safe_ui_message(tmp_path: Path, monkeypatch) -> 
     assert bundle[1] == "does-not-exist"
     assert "No persisted workflow run was found" in bundle[0]
     assert bundle[2:6] == ([], [], [], {})
-    assert "Choose one story" in bundle[6]
+    assert "Choose a fictional household story" in bundle[6]
 
 
 def test_unknown_story_returns_safe_explanation(tmp_path: Path, monkeypatch) -> None:
@@ -145,5 +146,5 @@ def test_unknown_story_returns_safe_explanation(tmp_path: Path, monkeypatch) -> 
 
     bundle = app.run_story_ui("invented story")
 
-    assert "Choose one of the four demo stories" in bundle[0]
+    assert "Choose one of the four onboarding stories" in bundle[0]
     assert bundle[1] == ""
