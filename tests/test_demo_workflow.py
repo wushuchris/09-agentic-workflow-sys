@@ -1,9 +1,9 @@
 import pytest
 
 from src.demo_workflow import (
-    build_service_request_registry,
-    build_service_request_workflow,
-    example_request,
+    build_onboarding_registry,
+    build_onboarding_workflow,
+    example_onboarding,
 )
 from src.executor import WorkflowExecutionError, execute_workflow, submit_human_decision
 from src.persistence import InMemoryStateStore
@@ -12,145 +12,173 @@ from src.validator import validate_workflow
 
 
 def test_demo_workflow_is_structurally_valid() -> None:
-    workflow = build_service_request_workflow()
+    workflow = build_onboarding_workflow()
 
     assert validate_workflow(workflow) is None
-    assert workflow.workflow_id == "controlled-service-request"
-    assert len(workflow.nodes) == 9
+    assert workflow.workflow_id == "wealth-household-onboarding"
+    assert len(workflow.nodes) == 10
 
 
-def test_normal_low_risk_request_completes_automatically() -> None:
-    workflow = build_service_request_workflow()
-    registry = build_service_request_registry()
-    store = InMemoryStateStore()
+def test_straightforward_household_reaches_standard_ready_path() -> None:
+    workflow = build_onboarding_workflow()
+    registry = build_onboarding_registry()
 
     run = execute_workflow(
         workflow,
         registry,
-        context=example_request(request_id="REQ-NORMAL"),
-        run_id="demo-normal",
-        state_store=store,
+        context=example_onboarding(household_id="HH-STANDARD"),
+        run_id="demo-standard",
+        state_store=InMemoryStateStore(),
     )
 
     assert run.status is WorkflowStatus.COMPLETED
-    assert run.node_runs["perform_automated_task"].attempt == 1
-    assert run.node_runs["risk_gate"].output["route"] == "LOW_RISK"
-    assert run.node_runs["low_risk_finalize"].status is NodeStatus.COMPLETED
+    assert run.node_runs["create_onboarding_package"].attempt == 1
+    assert run.node_runs["review_gate"].output == {
+        "route": "STANDARD_PATH",
+        "exception_reasons": [],
+    }
+    assert run.node_runs["onboarding_ready"].status is NodeStatus.COMPLETED
     assert run.node_runs["human_review"].status is NodeStatus.SKIPPED
-    assert run.node_runs["high_risk_finalize"].status is NodeStatus.SKIPPED
+    assert run.node_runs["reviewed_onboarding"].status is NodeStatus.SKIPPED
     assert run.final_output == {
-        "low_risk_finalize": {
-            "outcome": "AUTO_FINALIZED",
-            "approved_by": "WORKFLOW_POLICY",
+        "onboarding_ready": {
+            "outcome": "READY_FOR_ADVISOR_REVIEW",
+            "review_path": "STANDARD",
         }
     }
 
 
-def test_transient_failure_retries_once_then_recovers() -> None:
-    workflow = build_service_request_workflow()
-    registry = build_service_request_registry()
-
+def test_ai_capable_node_uses_deterministic_fallback_without_model() -> None:
     run = execute_workflow(
-        workflow,
-        registry,
-        context=example_request(
-            request_id="REQ-TRANSIENT",
+        build_onboarding_workflow(),
+        build_onboarding_registry(),
+        context=example_onboarding(household_id="HH-AI-FALLBACK"),
+        run_id="demo-ai-fallback",
+        state_store=InMemoryStateStore(),
+    )
+
+    output = run.node_runs["ai_intake_organizer"].output
+    assert output["source"] == "DETERMINISTIC_FALLBACK"
+    assert output["profile_category"] == "STANDARD_HOUSEHOLD"
+    assert "synthetic" in output["summary"].lower()
+
+
+def test_transient_failure_retries_once_then_recovers() -> None:
+    run = execute_workflow(
+        build_onboarding_workflow(),
+        build_onboarding_registry(),
+        context=example_onboarding(
+            household_id="HH-TRANSIENT",
             simulation_mode="TRANSIENT_ONCE",
         ),
         run_id="demo-transient",
         state_store=InMemoryStateStore(),
     )
 
-    automated = run.node_runs["perform_automated_task"]
+    package = run.node_runs["create_onboarding_package"]
     assert run.status is WorkflowStatus.COMPLETED
-    assert automated.status is NodeStatus.COMPLETED
-    assert automated.attempt == 2
-    assert automated.output["service_attempt"] == 2
+    assert package.status is NodeStatus.COMPLETED
+    assert package.attempt == 2
+    assert package.output["service_attempt"] == 2
     assert EventType.RETRY_SCHEDULED in [event.event_type for event in run.events]
 
 
-def test_invalid_request_fails_before_classification_or_action() -> None:
-    workflow = build_service_request_workflow()
-    registry = build_service_request_registry()
-    request = example_request(request_id="REQ-INVALID")
-    request["description"] = "   "
+def test_invalid_intake_fails_before_ai_or_package_preparation() -> None:
+    onboarding = example_onboarding(household_id="HH-INVALID")
+    onboarding["onboarding_notes"] = "   "
 
-    with pytest.raises(WorkflowExecutionError, match="description must be a non-blank string") as exc_info:
+    with pytest.raises(WorkflowExecutionError, match="onboarding_notes must be a non-blank string") as exc_info:
         execute_workflow(
-            workflow,
-            registry,
-            context=request,
+            build_onboarding_workflow(),
+            build_onboarding_registry(),
+            context=onboarding,
             run_id="demo-invalid",
             state_store=InMemoryStateStore(),
         )
 
     run = exc_info.value.run
     assert run.status is WorkflowStatus.FAILED
-    assert run.node_runs["validate_request"].status is NodeStatus.FAILED
-    assert run.node_runs["classify_request"].status is NodeStatus.PENDING
-    assert run.node_runs["perform_automated_task"].attempt == 0
+    assert run.node_runs["validate_intake"].status is NodeStatus.FAILED
+    assert run.node_runs["ai_intake_organizer"].status is NodeStatus.PENDING
+    assert run.node_runs["create_onboarding_package"].attempt == 0
 
 
-def test_high_risk_request_pauses_for_human_then_approval_completes() -> None:
-    workflow = build_service_request_workflow()
-    registry = build_service_request_registry()
+def test_complex_trust_household_pauses_then_approval_completes() -> None:
+    workflow = build_onboarding_workflow()
+    registry = build_onboarding_registry()
     store = InMemoryStateStore()
 
     paused = execute_workflow(
         workflow,
         registry,
-        context=example_request(
-            request_id="REQ-HIGH",
-            risk_level="HIGH",
-            estimated_cost=1_500.0,
-            priority="HIGH",
+        context=example_onboarding(
+            household_id="HH-EXCEPTION",
+            household_type="TRUST",
+            relationship_complexity="COMPLEX",
         ),
-        run_id="demo-high",
+        run_id="demo-exception",
         state_store=store,
     )
 
     assert paused.status is WorkflowStatus.WAITING_FOR_HUMAN
-    assert paused.node_runs["risk_gate"].output["route"] == "HIGH_RISK"
-    assert paused.node_runs["low_risk_finalize"].status is NodeStatus.SKIPPED
+    assert paused.node_runs["review_gate"].output["route"] == "REVIEW_REQUIRED"
+    assert "SPECIAL_STRUCTURE" in paused.node_runs["review_gate"].output["exception_reasons"]
+    assert "COMPLEX_RELATIONSHIP" in paused.node_runs["review_gate"].output["exception_reasons"]
+    assert paused.node_runs["onboarding_ready"].status is NodeStatus.SKIPPED
     assert paused.node_runs["human_review"].status is NodeStatus.WAITING_FOR_HUMAN
-    assert paused.node_runs["high_risk_finalize"].status is NodeStatus.PENDING
+    assert paused.node_runs["reviewed_onboarding"].status is NodeStatus.PENDING
     assert len(paused.human_reviews) == 1
 
-    review_id = paused.human_reviews[0].review_id
     completed = submit_human_decision(
         workflow,
         registry,
-        run_id="demo-high",
-        review_id=review_id,
+        run_id="demo-exception",
+        review_id=paused.human_reviews[0].review_id,
         decision=HumanDecision.APPROVE,
         state_store=store,
     )
 
     assert completed.status is WorkflowStatus.COMPLETED
     assert completed.node_runs["human_review"].status is NodeStatus.COMPLETED
-    assert completed.node_runs["high_risk_finalize"].status is NodeStatus.COMPLETED
-    assert completed.node_runs["validate_request"].attempt == 1
-    assert completed.node_runs["risk_gate"].attempt == 1
+    assert completed.node_runs["reviewed_onboarding"].status is NodeStatus.COMPLETED
+    assert completed.node_runs["validate_intake"].attempt == 1
+    assert completed.node_runs["review_gate"].attempt == 1
     assert completed.final_output == {
-        "high_risk_finalize": {
-            "outcome": "HUMAN_APPROVED_FINALIZATION",
-            "approved_by": "HUMAN_REVIEW",
+        "reviewed_onboarding": {
+            "outcome": "READY_AFTER_HUMAN_REVIEW",
+            "review_path": "EXCEPTION_REVIEW",
         }
     }
 
 
-def test_high_risk_human_rejection_ends_as_rejected_not_failed() -> None:
-    workflow = build_service_request_workflow()
-    registry = build_service_request_registry()
+def test_missing_documents_route_to_human_review() -> None:
+    run = execute_workflow(
+        build_onboarding_workflow(),
+        build_onboarding_registry(),
+        context=example_onboarding(
+            household_id="HH-MISSING-DOCS",
+            documents_complete=False,
+        ),
+        run_id="demo-missing-docs",
+        state_store=InMemoryStateStore(),
+    )
+
+    assert run.status is WorkflowStatus.WAITING_FOR_HUMAN
+    assert run.node_runs["document_check"].output["status"] == "MISSING_ITEMS"
+    assert "MISSING_DOCUMENTS" in run.node_runs["review_gate"].output["exception_reasons"]
+
+
+def test_human_rejection_ends_as_rejected_not_failed() -> None:
+    workflow = build_onboarding_workflow()
+    registry = build_onboarding_registry()
     store = InMemoryStateStore()
 
     paused = execute_workflow(
         workflow,
         registry,
-        context=example_request(
-            request_id="REQ-REJECT",
-            risk_level="HIGH",
-            estimated_cost=1_250.0,
+        context=example_onboarding(
+            household_id="HH-REJECT",
+            identity_status="REVIEW_REQUIRED",
         ),
         run_id="demo-reject",
         state_store=store,
@@ -167,21 +195,18 @@ def test_high_risk_human_rejection_ends_as_rejected_not_failed() -> None:
 
     assert rejected.status is WorkflowStatus.REJECTED
     assert rejected.node_runs["human_review"].status is NodeStatus.COMPLETED
-    assert rejected.node_runs["high_risk_finalize"].status is NodeStatus.PENDING
+    assert rejected.node_runs["reviewed_onboarding"].status is NodeStatus.PENDING
     assert EventType.HUMAN_REJECTED in [event.event_type for event in rejected.events]
     assert EventType.WORKFLOW_FAILED not in [event.event_type for event in rejected.events]
 
 
 def test_permanent_failure_is_not_retried_even_though_node_allows_retries() -> None:
-    workflow = build_service_request_workflow()
-    registry = build_service_request_registry()
-
-    with pytest.raises(WorkflowExecutionError, match="synthetic permanent service failure") as exc_info:
+    with pytest.raises(WorkflowExecutionError, match="synthetic permanent onboarding service failure") as exc_info:
         execute_workflow(
-            workflow,
-            registry,
-            context=example_request(
-                request_id="REQ-PERMANENT",
+            build_onboarding_workflow(),
+            build_onboarding_registry(),
+            context=example_onboarding(
+                household_id="HH-PERMANENT",
                 simulation_mode="PERMANENT",
             ),
             run_id="demo-permanent",
@@ -189,29 +214,25 @@ def test_permanent_failure_is_not_retried_even_though_node_allows_retries() -> N
         )
 
     run = exc_info.value.run
-    automated = run.node_runs["perform_automated_task"]
+    package = run.node_runs["create_onboarding_package"]
     assert run.status is WorkflowStatus.FAILED
-    assert automated.status is NodeStatus.FAILED
-    assert automated.attempt == 1
+    assert package.status is NodeStatus.FAILED
+    assert package.attempt == 1
     assert EventType.RETRY_SCHEDULED not in [event.event_type for event in run.events]
-    assert run.node_runs["verify_result"].status is NodeStatus.PENDING
+    assert run.node_runs["verify_onboarding_package"].status is NodeStatus.PENDING
 
 
-def test_audit_log_does_not_copy_request_description_or_supporting_info() -> None:
-    workflow = build_service_request_workflow()
-    registry = build_service_request_registry()
-    request = example_request(request_id="REQ-PRIVACY")
-    request["description"] = "Synthetic but intentionally private-looking demo text."
-    request["supporting_info"] = {"note": "Do not duplicate me into audit events."}
+def test_audit_log_does_not_copy_onboarding_notes() -> None:
+    onboarding = example_onboarding(household_id="HH-PRIVACY")
+    onboarding["onboarding_notes"] = "Synthetic but intentionally private-looking demo text."
 
     run = execute_workflow(
-        workflow,
-        registry,
-        context=request,
+        build_onboarding_workflow(),
+        build_onboarding_registry(),
+        context=onboarding,
         run_id="demo-privacy",
         state_store=InMemoryStateStore(),
     )
 
     audit_text = repr([event.details for event in run.events])
     assert "Synthetic but intentionally private-looking demo text." not in audit_text
-    assert "Do not duplicate me into audit events." not in audit_text
