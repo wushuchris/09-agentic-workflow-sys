@@ -1,6 +1,20 @@
+---
+title: Agent 9 — Agentic Workflow System
+emoji: ⚙️
+colorFrom: indigo
+colorTo: blue
+sdk: gradio
+sdk_version: 6.26.0
+app_file: app.py
+pinned: false
+license: mit
+---
+
 # Agent 9 — Agentic Workflow System
 
 [![CI](https://github.com/wushuchris/09-agentic-workflow-sys/actions/workflows/ci.yml/badge.svg)](https://github.com/wushuchris/09-agentic-workflow-sys/actions/workflows/ci.yml)
+
+**Hugging Face Space:** https://huggingface.co/spaces/FlyingNunchucks/09-agentic-workflow-sys
 
 A deterministic, resumable, and auditable workflow runtime for AI-assisted business processes.
 
@@ -239,7 +253,7 @@ duplicate execution count      0
 invalid transition count       0
 ```
 
-A focused local execution check of the ten evaluation scenarios passed 10/10. GitHub Actions now runs the complete repository test suite on pushes and pull requests to `main`; the first full CI run passed **109 tests** on Python 3.11 with Gradio 6.26.0 installed.
+A focused local execution check of the ten evaluation scenarios passed 10/10. GitHub Actions runs the complete repository test suite on pushes and pull requests to `main`; the first full CI run passed **109 tests** on Python 3.11 with Gradio 6.26.0 installed.
 
 ## Gradio Demo
 
@@ -261,11 +275,11 @@ Local SQLite persistence is appropriate for this portfolio demo, but it is not p
 
 ## CI and Deployment
 
-`.github/workflows/ci.yml` is the source-of-truth automation gate. Pushes and pull requests to `main` run the complete pytest suite before any deployment can occur.
+`.github/workflows/ci.yml` is the source-of-truth automation gate. Pushes and pull requests to `main` run the complete pytest suite. Pull requests are test-only; a push to `main` deploys to Hugging Face only after the test job succeeds.
 
-The Hugging Face sync job reuses the same `huggingface/hub-sync@v0.1.0` pattern used by earlier portfolio agents and targets `FlyingNunchucks/09-agentic-workflow-sys`. It requires the GitHub repository secret `HF_DEPLOY_TOKEN` and currently runs only through manual `workflow_dispatch`, after the test job succeeds.
+The Hugging Face sync job uses `huggingface/hub-sync@v0.1.0`, targets `FlyingNunchucks/09-agentic-workflow-sys`, and authenticates only through the GitHub repository secret `HF_DEPLOY_TOKEN`. GitHub remains the code source of truth.
 
-This manual-only deployment gate is intentional until the Hugging Face Space and deployment secret are configured and validated. After the first successful Space deployment, the deployment trigger can be changed to automatic pushes to `main` while preserving the `needs: test` gate.
+The first production sync completed successfully after the test gate, and subsequent pushes to `main` now follow the same test-then-deploy path automatically.
 
 ## Project Structure
 
@@ -302,4 +316,4 @@ Implementation is being added incrementally in small, testable changes.
 
 ## Status
 
-**Current phase:** Deterministic workflow engine, synthetic service-request workflow, bounded provider-agnostic model-assisted classification, structured evaluation harness, Gradio demo, and GitHub Actions CI are implemented. The Hugging Face deployment job is staged behind a manual test gate; Space creation, secret configuration, first deployment, live production validation, and final repository hygiene remain.
+**Current phase:** Deterministic workflow engine, synthetic service-request workflow, bounded provider-agnostic model-assisted classification, structured evaluation harness, Gradio demo, GitHub Actions CI, and automated GitHub → Hugging Face deployment are implemented. Live Space validation and final public-repository hygiene remain.
