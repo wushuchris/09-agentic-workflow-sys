@@ -55,14 +55,23 @@ def classify_with_model(
     request_type: str,
     description: str,
 ) -> dict[str, str]:
-    """Call a model and strictly validate its bounded classification proposal."""
+    """Call a model and strictly validate its bounded classification proposal.
+
+    Errors are deliberately sanitized because executor error text is included in
+    control-plane audit events. Rejected model output is never copied into those
+    events.
+    """
 
     prompt = build_classification_prompt(
         request_type=request_type,
         description=description,
     )
 
-    raw_response = model_call(prompt)
+    try:
+        raw_response = model_call(prompt)
+    except Exception as exc:
+        raise ModelClassificationError("model classification call failed") from exc
+
     if not isinstance(raw_response, str) or not raw_response.strip():
         raise ModelClassificationError("model response must be a non-blank JSON string")
 
@@ -70,7 +79,7 @@ def classify_with_model(
         proposal = ClassificationProposal.model_validate_json(raw_response)
     except (ValidationError, ValueError) as exc:
         raise ModelClassificationError(
-            f"model classification output failed validation: {exc}"
+            "model classification output failed schema validation"
         ) from exc
 
     return {
