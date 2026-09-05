@@ -120,21 +120,8 @@ class NodeRun(StrictModel):
     completed_at: datetime | None = None
 
 
-class WorkflowRun(StrictModel):
-    """Durable runtime state for one workflow execution."""
-
-    run_id: str = Field(min_length=1, max_length=100)
-    workflow_id: str = Field(min_length=1, max_length=100)
-    status: WorkflowStatus = WorkflowStatus.PENDING
-    node_runs: dict[str, NodeRun] = Field(default_factory=dict)
-    context: dict[str, Any] = Field(default_factory=dict)
-    final_output: dict[str, Any] | None = None
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
-
-
 class WorkflowEvent(StrictModel):
-    """Append-only audit event emitted when workflow state changes."""
+    """Structured audit event emitted when workflow state changes."""
 
     event_id: str = Field(min_length=1, max_length=100)
     run_id: str = Field(min_length=1, max_length=100)
@@ -142,6 +129,20 @@ class WorkflowEvent(StrictModel):
     node_id: str | None = Field(default=None, min_length=1, max_length=100)
     details: dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=utc_now)
+
+
+class WorkflowRun(StrictModel):
+    """Durable runtime state and append-only audit history for one workflow run."""
+
+    run_id: str = Field(min_length=1, max_length=100)
+    workflow_id: str = Field(min_length=1, max_length=100)
+    status: WorkflowStatus = WorkflowStatus.PENDING
+    node_runs: dict[str, NodeRun] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
+    events: tuple[WorkflowEvent, ...] = Field(default_factory=tuple)
+    final_output: dict[str, Any] | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class HumanReviewRequest(StrictModel):
