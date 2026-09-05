@@ -1,136 +1,142 @@
-"""Public-safe service-request demo workflow for Agent 9.
+"""Public-safe wealth-management onboarding demo for Agent 9.
 
-The Controlled Service Request Workflow exercises the workflow runtime end to end
-with deterministic simulated actions. Classification is deterministic by default
-and can optionally be replaced by a bounded model-assisted classifier. All demo
-inputs and outputs are synthetic.
+The fictional Household Onboarding Workflow exercises the workflow runtime end to end
+with deterministic simulated actions. AI assistance is optional and bounded to intake
+organization; workflow control, exception routing, retries, persistence, and human
+approval remain deterministic. All households, notes, and outputs are synthetic.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from src.model_assist import ModelCall, classify_with_model
+from src.model_assist import ModelCall, organize_onboarding_with_model
 from src.registry import HandlerRegistry
 from src.retry import RetryableHandlerError
 from src.schemas import NodeDefinition, NodeType, RetryPolicy, WorkflowDefinition
 
 
-ALLOWED_REQUEST_TYPES = {"ACCESS", "BILLING", "GENERAL"}
-ALLOWED_PRIORITIES = {"LOW", "NORMAL", "HIGH"}
-ALLOWED_RISK_LEVELS = {"LOW", "HIGH"}
+ALLOWED_HOUSEHOLD_TYPES = {"INDIVIDUAL", "JOINT", "TRUST", "ENTITY"}
+ALLOWED_IDENTITY_STATUSES = {"VERIFIED", "REVIEW_REQUIRED"}
+ALLOWED_COMPLEXITY_LEVELS = {"STANDARD", "COMPLEX"}
 ALLOWED_SIMULATION_MODES = {"NONE", "TRANSIENT_ONCE", "PERMANENT"}
-MAX_AUTOMATED_COST = 5_000.0
-HUMAN_REVIEW_COST = 1_000.0
+SPECIAL_STRUCTURE_TYPES = {"TRUST", "ENTITY"}
 
 
-def build_service_request_workflow() -> WorkflowDefinition:
-    """Return the fixed workflow used by the public demo."""
+def build_onboarding_workflow() -> WorkflowDefinition:
+    """Return the fixed fictional household-onboarding workflow used by the public demo."""
 
     return WorkflowDefinition(
-        workflow_id="controlled-service-request",
-        name="Controlled Service Request Workflow",
+        workflow_id="wealth-household-onboarding",
+        name="Fictional Wealth Management Household Onboarding",
         version="1.0",
         nodes=[
             NodeDefinition(
-                node_id="validate_request",
-                name="Validate Request",
+                node_id="validate_intake",
+                name="Validate Intake",
                 node_type=NodeType.TASK,
-                handler="validate_request",
+                handler="validate_intake",
             ),
             NodeDefinition(
-                node_id="classify_request",
-                name="Classify Request",
+                node_id="ai_intake_organizer",
+                name="AI Intake Organizer",
                 node_type=NodeType.TASK,
-                handler="classify_request",
-                depends_on=["validate_request"],
+                handler="ai_intake_organizer",
+                depends_on=["validate_intake"],
+            ),
+            NodeDefinition(
+                node_id="document_check",
+                name="Document Check",
+                node_type=NodeType.TASK,
+                handler="document_check",
+                depends_on=["ai_intake_organizer"],
             ),
             NodeDefinition(
                 node_id="policy_check",
-                name="Policy Check",
+                name="Onboarding Policy Check",
                 node_type=NodeType.TASK,
                 handler="policy_check",
-                depends_on=["classify_request"],
+                depends_on=["document_check"],
             ),
             NodeDefinition(
-                node_id="perform_automated_task",
-                name="Perform Automated Task",
+                node_id="create_onboarding_package",
+                name="Create Onboarding Package",
                 node_type=NodeType.TASK,
-                handler="perform_automated_task",
+                handler="create_onboarding_package",
                 depends_on=["policy_check"],
                 retry_policy=RetryPolicy(retryable=True, max_attempts=3),
             ),
             NodeDefinition(
-                node_id="verify_result",
-                name="Verify Result",
+                node_id="verify_onboarding_package",
+                name="Verify Onboarding Package",
                 node_type=NodeType.TASK,
-                handler="verify_result",
-                depends_on=["perform_automated_task"],
+                handler="verify_onboarding_package",
+                depends_on=["create_onboarding_package"],
             ),
             NodeDefinition(
-                node_id="risk_gate",
-                name="Risk Gate",
+                node_id="review_gate",
+                name="Review Gate",
                 node_type=NodeType.DECISION,
-                handler="risk_gate",
-                depends_on=["verify_result"],
+                handler="review_gate",
+                depends_on=["verify_onboarding_package"],
                 routes={
-                    "LOW_RISK": "low_risk_finalize",
-                    "HIGH_RISK": "human_review",
+                    "STANDARD_PATH": "onboarding_ready",
+                    "REVIEW_REQUIRED": "human_review",
                 },
             ),
             NodeDefinition(
-                node_id="low_risk_finalize",
-                name="Low-Risk Finalize",
+                node_id="onboarding_ready",
+                name="Standard Onboarding Ready",
                 node_type=NodeType.TASK,
-                handler="low_risk_finalize",
-                depends_on=["risk_gate"],
+                handler="onboarding_ready",
+                depends_on=["review_gate"],
             ),
             NodeDefinition(
                 node_id="human_review",
-                name="Human Review",
+                name="Operations / Compliance Review",
                 node_type=NodeType.HUMAN_GATE,
-                depends_on=["risk_gate"],
+                depends_on=["review_gate"],
                 config={
-                    "reason": "High-risk service request requires explicit human approval."
+                    "reason": (
+                        "A fictional onboarding exception requires explicit operations or "
+                        "compliance review before the package can be marked ready."
+                    )
                 },
             ),
             NodeDefinition(
-                node_id="high_risk_finalize",
-                name="High-Risk Finalize",
+                node_id="reviewed_onboarding",
+                name="Reviewed Onboarding Ready",
                 node_type=NodeType.TASK,
-                handler="high_risk_finalize",
+                handler="reviewed_onboarding",
                 depends_on=["human_review"],
             ),
         ],
     )
 
 
-def build_service_request_registry(
+def build_onboarding_registry(
     *,
-    classification_model: ModelCall | None = None,
+    onboarding_model: ModelCall | None = None,
 ) -> HandlerRegistry:
-    """Return allowlisted handlers for the synthetic demo.
+    """Return allowlisted handlers for the fictional onboarding demo.
 
-    When classification_model is omitted, classification remains deterministic.
-    When supplied, only the classification handler delegates to the bounded model
-    adapter; all workflow control and all other handlers remain deterministic.
-
-    The simulated automated-task handler keeps per-request attempt counters only so
-    the TRANSIENT_ONCE demo mode can deterministically fail once and then recover.
-    It never calls an external service or performs a real side effect.
+    When onboarding_model is omitted, the AI-capable intake step uses a deterministic
+    fallback so the public demo works without credentials. When a model callable is
+    supplied, only the intake-organizer handler delegates to the bounded model adapter;
+    all workflow control and all other handlers remain deterministic.
     """
 
     registry = HandlerRegistry()
-    automated_attempts: dict[str, int] = {}
+    package_attempts: dict[str, int] = {}
 
-    def validate_request(payload: dict[str, Any]) -> dict[str, Any]:
+    def validate_intake(payload: dict[str, Any]) -> dict[str, Any]:
         context = payload["context"]
         required_strings = (
-            "request_id",
-            "request_type",
-            "description",
-            "priority",
-            "risk_level",
+            "household_id",
+            "household_type",
+            "onboarding_notes",
+            "identity_status",
+            "relationship_complexity",
         )
         normalized: dict[str, Any] = {}
 
@@ -140,29 +146,32 @@ def build_service_request_registry(
                 raise ValueError(f"{field} must be a non-blank string")
             normalized[field] = value.strip()
 
-        normalized["request_type"] = normalized["request_type"].upper()
-        normalized["priority"] = normalized["priority"].upper()
-        normalized["risk_level"] = normalized["risk_level"].upper()
+        normalized["household_type"] = normalized["household_type"].upper()
+        normalized["identity_status"] = normalized["identity_status"].upper()
+        normalized["relationship_complexity"] = normalized[
+            "relationship_complexity"
+        ].upper()
 
-        if normalized["request_type"] not in ALLOWED_REQUEST_TYPES:
+        if normalized["household_type"] not in ALLOWED_HOUSEHOLD_TYPES:
             raise ValueError(
-                f"request_type must be one of: {', '.join(sorted(ALLOWED_REQUEST_TYPES))}"
+                "household_type must be one of: "
+                + ", ".join(sorted(ALLOWED_HOUSEHOLD_TYPES))
             )
-        if normalized["priority"] not in ALLOWED_PRIORITIES:
+        if normalized["identity_status"] not in ALLOWED_IDENTITY_STATUSES:
             raise ValueError(
-                f"priority must be one of: {', '.join(sorted(ALLOWED_PRIORITIES))}"
+                "identity_status must be one of: "
+                + ", ".join(sorted(ALLOWED_IDENTITY_STATUSES))
             )
-        if normalized["risk_level"] not in ALLOWED_RISK_LEVELS:
+        if normalized["relationship_complexity"] not in ALLOWED_COMPLEXITY_LEVELS:
             raise ValueError(
-                f"risk_level must be one of: {', '.join(sorted(ALLOWED_RISK_LEVELS))}"
+                "relationship_complexity must be one of: "
+                + ", ".join(sorted(ALLOWED_COMPLEXITY_LEVELS))
             )
 
-        estimated_cost = context.get("estimated_cost")
-        if isinstance(estimated_cost, bool) or not isinstance(estimated_cost, (int, float)):
-            raise ValueError("estimated_cost must be a non-negative number")
-        if estimated_cost < 0:
-            raise ValueError("estimated_cost must be a non-negative number")
-        normalized["estimated_cost"] = float(estimated_cost)
+        documents_complete = context.get("documents_complete")
+        if not isinstance(documents_complete, bool):
+            raise ValueError("documents_complete must be a boolean")
+        normalized["documents_complete"] = documents_complete
 
         simulation_mode = context.get("simulation_mode", "NONE")
         if not isinstance(simulation_mode, str):
@@ -174,137 +183,151 @@ def build_service_request_registry(
                 + ", ".join(sorted(ALLOWED_SIMULATION_MODES))
             )
         normalized["simulation_mode"] = simulation_mode
-        normalized["supporting_info_present"] = bool(context.get("supporting_info"))
         return normalized
 
-    def classify_request(payload: dict[str, Any]) -> dict[str, Any]:
-        validated = payload["dependencies"]["validate_request"]
+    def ai_intake_organizer(payload: dict[str, Any]) -> dict[str, Any]:
+        intake = payload["dependencies"]["validate_intake"]
 
-        if classification_model is not None:
-            proposal = classify_with_model(
-                classification_model,
-                request_type=validated["request_type"],
-                description=validated["description"],
+        if onboarding_model is not None:
+            return organize_onboarding_with_model(
+                onboarding_model,
+                household_type=intake["household_type"],
+                onboarding_notes=intake["onboarding_notes"],
             )
-            return {
-                **proposal,
-                "priority": validated["priority"],
-            }
 
-        classification_by_type = {
-            "ACCESS": "ACCESS_REQUEST",
-            "BILLING": "BILLING_REQUEST",
-            "GENERAL": "GENERAL_SERVICE_REQUEST",
-        }
+        household_type = intake["household_type"]
+        if household_type in SPECIAL_STRUCTURE_TYPES:
+            profile_category = "SPECIAL_STRUCTURE"
+        else:
+            profile_category = "STANDARD_HOUSEHOLD"
         return {
-            "classification": classification_by_type[validated["request_type"]],
-            "priority": validated["priority"],
-            "source": "DETERMINISTIC",
+            "profile_category": profile_category,
+            "summary": (
+                f"Synthetic {household_type.lower()} household intake organized for "
+                "fictional onboarding review."
+            ),
+            "source": "DETERMINISTIC_FALLBACK",
+        }
+
+    def document_check(payload: dict[str, Any]) -> dict[str, Any]:
+        intake = payload["dependencies"]["validate_intake"]
+        return {
+            "documents_complete": intake["documents_complete"],
+            "status": "COMPLETE" if intake["documents_complete"] else "MISSING_ITEMS",
         }
 
     def policy_check(payload: dict[str, Any]) -> dict[str, Any]:
-        validated = payload["dependencies"]["classify_request"]
-        request = payload["context"]
-        estimated_cost = float(request["estimated_cost"])
-        if estimated_cost > MAX_AUTOMATED_COST:
-            raise RuntimeError(
-                f"estimated cost exceeds automated policy limit of {MAX_AUTOMATED_COST:.0f}"
-            )
+        intake = payload["dependencies"]["validate_intake"]
+        documents = payload["dependencies"]["document_check"]
+        exceptions: list[str] = []
+
+        if not documents["documents_complete"]:
+            exceptions.append("MISSING_DOCUMENTS")
+        if intake["identity_status"] == "REVIEW_REQUIRED":
+            exceptions.append("IDENTITY_REVIEW_REQUIRED")
+        if intake["relationship_complexity"] == "COMPLEX":
+            exceptions.append("COMPLEX_RELATIONSHIP")
+        if intake["household_type"] in SPECIAL_STRUCTURE_TYPES:
+            exceptions.append("SPECIAL_STRUCTURE")
+
         return {
-            "allowed": True,
-            "classification": validated["classification"],
-            "policy_limit": MAX_AUTOMATED_COST,
+            "eligible_to_prepare_package": True,
+            "exception_reasons": exceptions,
         }
 
-    def perform_automated_task(payload: dict[str, Any]) -> dict[str, Any]:
+    def create_onboarding_package(payload: dict[str, Any]) -> dict[str, Any]:
         context = payload["context"]
-        request_id = str(context["request_id"]).strip()
+        household_id = str(context["household_id"]).strip()
         simulation_mode = str(context.get("simulation_mode", "NONE")).strip().upper()
-        attempt = automated_attempts.get(request_id, 0) + 1
-        automated_attempts[request_id] = attempt
+        attempt = package_attempts.get(household_id, 0) + 1
+        package_attempts[household_id] = attempt
 
         if simulation_mode == "TRANSIENT_ONCE" and attempt == 1:
-            raise RetryableHandlerError("synthetic temporary service interruption")
+            raise RetryableHandlerError("synthetic temporary onboarding service interruption")
         if simulation_mode == "PERMANENT":
-            raise RuntimeError("synthetic permanent service failure")
+            raise RuntimeError("synthetic permanent onboarding service failure")
 
         return {
-            "action": "SIMULATED_SERVICE_ACTION",
-            "status": "SUCCESS",
+            "package_status": "PREPARED",
             "service_attempt": attempt,
+            "action": "SIMULATED_ONBOARDING_PACKAGE_PREPARATION",
         }
 
-    def verify_result(payload: dict[str, Any]) -> dict[str, Any]:
-        result = payload["dependencies"]["perform_automated_task"]
-        if result.get("status") != "SUCCESS":
-            raise RuntimeError("automated task result failed verification")
+    def verify_onboarding_package(payload: dict[str, Any]) -> dict[str, Any]:
+        package = payload["dependencies"]["create_onboarding_package"]
+        if package.get("package_status") != "PREPARED":
+            raise RuntimeError("onboarding package failed verification")
         return {
             "verified": True,
-            "action": result["action"],
+            "action": package["action"],
         }
 
-    def risk_gate(payload: dict[str, Any]) -> dict[str, Any]:
-        context = payload["context"]
-        risk_level = str(context["risk_level"]).strip().upper()
-        estimated_cost = float(context["estimated_cost"])
-        priority = str(context["priority"]).strip().upper()
-
-        requires_human = (
-            risk_level == "HIGH"
-            or estimated_cost >= HUMAN_REVIEW_COST
-            or (priority == "HIGH" and estimated_cost >= 500.0)
-        )
+    def review_gate(payload: dict[str, Any]) -> dict[str, Any]:
+        policy = payload["dependencies"]["policy_check"]
+        reasons = list(policy["exception_reasons"])
         return {
-            "route": "HIGH_RISK" if requires_human else "LOW_RISK",
-            "risk_level": risk_level,
+            "route": "REVIEW_REQUIRED" if reasons else "STANDARD_PATH",
+            "exception_reasons": reasons,
         }
 
-    def low_risk_finalize(payload: dict[str, Any]) -> dict[str, Any]:
-        decision = payload["dependencies"]["risk_gate"]
-        if decision.get("route") != "LOW_RISK":
-            raise RuntimeError("low-risk finalizer received the wrong route")
+    def onboarding_ready(payload: dict[str, Any]) -> dict[str, Any]:
+        decision = payload["dependencies"]["review_gate"]
+        if decision.get("route") != "STANDARD_PATH":
+            raise RuntimeError("standard onboarding finalizer received the wrong route")
         return {
-            "outcome": "AUTO_FINALIZED",
-            "approved_by": "WORKFLOW_POLICY",
+            "outcome": "READY_FOR_ADVISOR_REVIEW",
+            "review_path": "STANDARD",
         }
 
-    def high_risk_finalize(payload: dict[str, Any]) -> dict[str, Any]:
+    def reviewed_onboarding(payload: dict[str, Any]) -> dict[str, Any]:
         review = payload["dependencies"]["human_review"]
         if review.get("decision") != "APPROVE":
-            raise RuntimeError("high-risk finalizer requires human approval")
+            raise RuntimeError("reviewed onboarding requires explicit human approval")
         return {
-            "outcome": "HUMAN_APPROVED_FINALIZATION",
-            "approved_by": "HUMAN_REVIEW",
+            "outcome": "READY_AFTER_HUMAN_REVIEW",
+            "review_path": "EXCEPTION_REVIEW",
         }
 
-    registry.register("validate_request", validate_request)
-    registry.register("classify_request", classify_request)
+    registry.register("validate_intake", validate_intake)
+    registry.register("ai_intake_organizer", ai_intake_organizer)
+    registry.register("document_check", document_check)
     registry.register("policy_check", policy_check)
-    registry.register("perform_automated_task", perform_automated_task)
-    registry.register("verify_result", verify_result)
-    registry.register("risk_gate", risk_gate)
-    registry.register("low_risk_finalize", low_risk_finalize)
-    registry.register("high_risk_finalize", high_risk_finalize)
+    registry.register("create_onboarding_package", create_onboarding_package)
+    registry.register("verify_onboarding_package", verify_onboarding_package)
+    registry.register("review_gate", review_gate)
+    registry.register("onboarding_ready", onboarding_ready)
+    registry.register("reviewed_onboarding", reviewed_onboarding)
     return registry
 
 
-def example_request(
+def example_onboarding(
     *,
-    request_id: str = "REQ-DEMO-001",
-    risk_level: str = "LOW",
-    estimated_cost: float = 125.0,
-    priority: str = "NORMAL",
+    household_id: str = "HH-DEMO-001",
+    household_type: str = "JOINT",
+    onboarding_notes: str = (
+        "Fictional household seeking a standard advisory relationship. "
+        "All intake information in this demo is synthetic."
+    ),
+    documents_complete: bool = True,
+    identity_status: str = "VERIFIED",
+    relationship_complexity: str = "STANDARD",
     simulation_mode: str = "NONE",
 ) -> dict[str, Any]:
-    """Return one public-safe synthetic request suitable for demos and tests."""
+    """Return one public-safe synthetic household suitable for demos and tests."""
 
     return {
-        "request_id": request_id,
-        "request_type": "ACCESS",
-        "description": "Provision synthetic access for a fictional demo user.",
-        "priority": priority,
-        "risk_level": risk_level,
-        "estimated_cost": estimated_cost,
-        "supporting_info": {"source": "synthetic-demo"},
+        "household_id": household_id,
+        "household_type": household_type,
+        "onboarding_notes": onboarding_notes,
+        "documents_complete": documents_complete,
+        "identity_status": identity_status,
+        "relationship_complexity": relationship_complexity,
         "simulation_mode": simulation_mode,
     }
+
+
+# Backward-compatible aliases keep older internal imports from breaking during the
+# incremental migration. Public documentation and the Gradio app use onboarding names.
+build_service_request_workflow = build_onboarding_workflow
+build_service_request_registry = build_onboarding_registry
+example_request = example_onboarding
