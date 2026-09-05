@@ -8,14 +8,17 @@ from src.executor import execute_workflow, submit_human_decision
 from src.persistence import InMemoryStateStore
 from src.schemas import HumanDecision, WorkflowStatus
 from src.ui_presenters import (
+    ai_insight_html,
     business_journey_html,
     business_outcome_html,
     evaluation_case_rows,
     evaluation_metric_rows,
     event_rows,
     review_rows,
+    routing_explanation_html,
     run_bundle,
     run_summary,
+    workflow_path_html,
 )
 
 
@@ -40,12 +43,10 @@ def test_run_bundle_exposes_runtime_views_without_onboarding_context_in_events()
     assert events
     assert reviews == []
     assert final_output["onboarding_ready"]["outcome"] == "READY_FOR_ADVISOR_REVIEW"
-
-    event_text = repr(events)
-    assert "SYNTHETIC_CONTEXT_MARKER" not in event_text
+    assert "SYNTHETIC_CONTEXT_MARKER" not in repr(events)
 
 
-def test_business_presenters_explain_standard_onboarding_path_in_plain_english() -> None:
+def test_standard_path_presenters_explain_ai_and_code_roles() -> None:
     run = execute_workflow(
         build_onboarding_workflow(),
         build_onboarding_registry(),
@@ -56,12 +57,49 @@ def test_business_presenters_explain_standard_onboarding_path_in_plain_english()
 
     outcome = business_outcome_html(run)
     journey = business_journey_html(run)
+    ai_panel = ai_insight_html(run)
+    why_panel = routing_explanation_html(run)
+    path = workflow_path_html(run)
 
     assert "ready for advisor review" in outcome.lower()
     assert "AI Intake Organizer" in journey
     assert "deterministic fallback" in journey.lower()
     assert "Standard package ready" in journey
-    assert "Not needed on this path" in journey
+    assert "DETERMINISTIC FALLBACK" in ai_panel
+    assert "included in the simulated onboarding package" in ai_panel
+    assert "Standard path selected by code" in why_panel
+    assert "did <strong>not</strong> choose this route" in why_panel
+    assert "Live workflow path" in path
+    assert "map-node-ai" in path
+    assert "map-node-completed" in path
+
+
+def test_live_model_presenter_labels_model_without_granting_routing_authority() -> None:
+    def fake_model(prompt: str) -> str:
+        return (
+            '{"profile_category":"STANDARD_HOUSEHOLD",'
+            '"summary":"Live model organized this fictional intake."}'
+        )
+
+    run = execute_workflow(
+        build_onboarding_workflow(),
+        build_onboarding_registry(
+            onboarding_model=fake_model,
+            model_label="example/live-model",
+        ),
+        context=example_onboarding(household_id="UI-LIVE-MODEL"),
+        run_id="ui-live-model-run",
+        state_store=InMemoryStateStore(),
+    )
+
+    ai_panel = ai_insight_html(run)
+    why_panel = routing_explanation_html(run)
+
+    assert "LIVE HUGGING FACE MODEL" in ai_panel
+    assert "example/live-model" in ai_panel
+    assert "Live model organized this fictional intake." in ai_panel
+    assert "AI did not decide" in ai_panel
+    assert "Standard path selected by code" in why_panel
 
 
 def test_business_presenters_explain_retry_recovery_without_raw_errors() -> None:
@@ -85,7 +123,7 @@ def test_business_presenters_explain_retry_recovery_without_raw_errors() -> None
     assert "synthetic temporary onboarding service interruption" not in outcome
 
 
-def test_waiting_human_summary_and_review_rows_are_clear() -> None:
+def test_waiting_human_presenters_explain_exact_deterministic_reasons() -> None:
     run = execute_workflow(
         build_onboarding_workflow(),
         build_onboarding_registry(),
@@ -102,7 +140,16 @@ def test_waiting_human_summary_and_review_rows_are_clear() -> None:
     assert "Action required" in run_summary(run)
     assert "needs a person" in business_outcome_html(run)
     assert "Waiting for a person" in business_journey_html(run)
-    assert "special structure" in business_journey_html(run).lower()
+
+    why_panel = routing_explanation_html(run)
+    assert "Human review required by deterministic rules" in why_panel
+    assert "Trust or entity structure" in why_panel
+    assert "Relationship marked complex" in why_panel
+    assert "not from the AI-generated summary" in why_panel
+
+    path = workflow_path_html(run)
+    assert "map-node-waiting-for-human" in path
+    assert "map-node-skipped" in path
 
     rows = review_rows(run)
     assert len(rows) == 1
@@ -139,6 +186,7 @@ def test_business_presenter_explains_human_approved_completion() -> None:
     assert completed.status is WorkflowStatus.COMPLETED
     assert "ready after human review" in business_outcome_html(completed).lower()
     assert "Approved by a person" in business_journey_html(completed)
+    assert "map-node-completed" in workflow_path_html(completed)
 
 
 def test_event_rows_preserve_append_only_event_order() -> None:
