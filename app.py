@@ -249,9 +249,9 @@ APP_CSS = """
 
 HERO_HTML = """
 <div class="agent-hero">
-  <div class="agent-eyebrow">WEALTH MANAGEMENT • AI WORKFLOW PATTERN • SYNTHETIC DEMO</div>
+  <div class="agent-eyebrow">WEALTH MANAGEMENT • OPERATIONS WORKFLOW DASHBOARD • SYNTHETIC DEMO</div>
   <h1>Agent 9 — Agentic Workflow System</h1>
-  <p><strong>Imagine a fictional wealth-management firm onboarding a new household.</strong> AI organizes the unstructured intake into useful work product. Deterministic software checks documents and exception rules, prepares and verifies the package, retries temporary operational problems, and decides whether the case can stay on the standard path or must pause for a person. No real client, account, KYC/AML service, money movement, or trade is involved.</p>
+  <p><strong>Think of this as an operations workflow dashboard for a fictional wealth-management firm.</strong> In this example, the dashboard follows a new household through onboarding and makes the AI step, deterministic controls, retries, routing, and human review visible in one place. AI organizes the unstructured intake into useful work product while application code governs what happens next. No real client, account, KYC/AML service, money movement, or trade is involved.</p>
 </div>
 """
 
