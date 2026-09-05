@@ -1,9 +1,9 @@
 """Deterministic evaluation harness for the Agentic Workflow System.
 
-The suite exercises the public-safe service-request workflow across success,
-recovery, escalation, persistence, failure, and adversarial-control scenarios.
-It returns structured case results and aggregate workflow-engineering metrics that
-can later be displayed by the Gradio demo or used in CI.
+The suite exercises the public-safe fictional wealth-onboarding workflow across
+success, recovery, human review, persistence, failure, and adversarial-control
+scenarios. It returns structured case results and aggregate workflow-engineering
+metrics that can be displayed by the Gradio demo or enforced in CI.
 """
 
 from __future__ import annotations
@@ -14,9 +14,9 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.demo_workflow import (
-    build_service_request_registry,
-    build_service_request_workflow,
-    example_request,
+    build_onboarding_registry,
+    build_onboarding_workflow,
+    example_onboarding,
 )
 from src.executor import (
     WorkflowExecutionError,
@@ -75,10 +75,10 @@ def run_evaluation_suite() -> EvaluationReport:
     """Run all deterministic Agent 9 evaluation cases and compute metrics."""
 
     case_factories: tuple[tuple[str, str, CaseFactory], ...] = (
-        ("normal_low_risk", "success", _evaluate_normal_low_risk),
+        ("straightforward_onboarding", "success", _evaluate_straightforward_onboarding),
         ("transient_retry_recovery", "retry", _evaluate_transient_retry_recovery),
-        ("high_risk_approval", "human_escalation", _evaluate_high_risk_approval),
-        ("high_risk_rejection", "human_escalation", _evaluate_high_risk_rejection),
+        ("exception_approval", "human_escalation", _evaluate_exception_approval),
+        ("exception_rejection", "human_escalation", _evaluate_exception_rejection),
         ("validation_failure", "failure_containment", _evaluate_validation_failure),
         ("permanent_failure", "failure_containment", _evaluate_permanent_failure),
         ("checkpoint_resume", "persistence", _evaluate_checkpoint_resume),
@@ -116,31 +116,31 @@ def run_evaluation_suite() -> EvaluationReport:
     )
 
 
-def _evaluate_normal_low_risk() -> EvaluationCaseResult:
+def _evaluate_straightforward_onboarding() -> EvaluationCaseResult:
     run = execute_workflow(
-        build_service_request_workflow(),
-        build_service_request_registry(),
-        context=example_request(request_id="EVAL-NORMAL"),
-        run_id="eval-normal",
+        build_onboarding_workflow(),
+        build_onboarding_registry(),
+        context=example_onboarding(household_id="EVAL-STANDARD"),
+        run_id="eval-standard",
         state_store=InMemoryStateStore(),
     )
     event_types = _event_types(run)
 
     return _result(
-        case_id="normal_low_risk",
+        case_id="straightforward_onboarding",
         category="success",
-        expected="low-risk request completes automatically without human review",
+        expected="straightforward fictional household reaches the standard ready path without human review",
         observed=run.status.value,
         checks={
             "completed_as_expected": run.status is WorkflowStatus.COMPLETED,
             "expected_path": (
-                run.node_runs["risk_gate"].output == {
-                    "route": "LOW_RISK",
-                    "risk_level": "LOW",
+                run.node_runs["review_gate"].output == {
+                    "route": "STANDARD_PATH",
+                    "exception_reasons": [],
                 }
-                and run.node_runs["low_risk_finalize"].status is NodeStatus.COMPLETED
+                and run.node_runs["onboarding_ready"].status is NodeStatus.COMPLETED
                 and run.node_runs["human_review"].status is NodeStatus.SKIPPED
-                and run.node_runs["high_risk_finalize"].status is NodeStatus.SKIPPED
+                and run.node_runs["reviewed_onboarding"].status is NodeStatus.SKIPPED
             ),
             "escalation_behavior": EventType.HUMAN_REVIEW_REQUESTED not in event_types,
             "audit_complete": _has_events(
@@ -156,10 +156,10 @@ def _evaluate_normal_low_risk() -> EvaluationCaseResult:
 
 def _evaluate_transient_retry_recovery() -> EvaluationCaseResult:
     run = execute_workflow(
-        build_service_request_workflow(),
-        build_service_request_registry(),
-        context=example_request(
-            request_id="EVAL-TRANSIENT",
+        build_onboarding_workflow(),
+        build_onboarding_registry(),
+        context=example_onboarding(
+            household_id="EVAL-TRANSIENT",
             simulation_mode="TRANSIENT_ONCE",
         ),
         run_id="eval-transient",
@@ -170,14 +170,14 @@ def _evaluate_transient_retry_recovery() -> EvaluationCaseResult:
     return _result(
         case_id="transient_retry_recovery",
         category="retry",
-        expected="one retryable failure is retried once and then recovers",
+        expected="one retryable package-preparation failure is retried once and then recovers",
         observed=run.status.value,
         checks={
             "completed_as_expected": run.status is WorkflowStatus.COMPLETED,
             "retry_behavior": (
-                run.node_runs["perform_automated_task"].attempt == 2
+                run.node_runs["create_onboarding_package"].attempt == 2
                 and len(retries) == 1
-                and run.node_runs["perform_automated_task"].status is NodeStatus.COMPLETED
+                and run.node_runs["create_onboarding_package"].status is NodeStatus.COMPLETED
             ),
             "audit_complete": _has_events(
                 run,
@@ -190,27 +190,30 @@ def _evaluate_transient_retry_recovery() -> EvaluationCaseResult:
     )
 
 
-def _evaluate_high_risk_approval() -> EvaluationCaseResult:
-    workflow = build_service_request_workflow()
-    registry = build_service_request_registry()
+def _exception_context(household_id: str) -> dict[str, Any]:
+    return example_onboarding(
+        household_id=household_id,
+        household_type="TRUST",
+        relationship_complexity="COMPLEX",
+    )
+
+
+def _evaluate_exception_approval() -> EvaluationCaseResult:
+    workflow = build_onboarding_workflow()
+    registry = build_onboarding_registry()
     store = InMemoryStateStore()
     paused = execute_workflow(
         workflow,
         registry,
-        context=example_request(
-            request_id="EVAL-HIGH-APPROVE",
-            risk_level="HIGH",
-            estimated_cost=1_500.0,
-            priority="HIGH",
-        ),
-        run_id="eval-high-approve",
+        context=_exception_context("EVAL-EXCEPTION-APPROVE"),
+        run_id="eval-exception-approve",
         state_store=store,
     )
     review_id = paused.human_reviews[0].review_id
     completed = submit_human_decision(
         workflow,
         registry,
-        run_id="eval-high-approve",
+        run_id="eval-exception-approve",
         review_id=review_id,
         decision=HumanDecision.APPROVE,
         state_store=store,
@@ -221,7 +224,7 @@ def _evaluate_high_risk_approval() -> EvaluationCaseResult:
         submit_human_decision(
             workflow,
             registry,
-            run_id="eval-high-approve",
+            run_id="eval-exception-approve",
             review_id=review_id,
             decision=HumanDecision.APPROVE,
             state_store=store,
@@ -229,20 +232,20 @@ def _evaluate_high_risk_approval() -> EvaluationCaseResult:
     except WorkflowHumanDecisionError:
         duplicate_blocked = True
 
-    stored = store.load("eval-high-approve")
-    duplicate_executions = max(0, stored.node_runs["high_risk_finalize"].attempt - 1)
+    stored = store.load("eval-exception-approve")
+    duplicate_executions = max(0, stored.node_runs["reviewed_onboarding"].attempt - 1)
 
     return _result(
-        case_id="high_risk_approval",
+        case_id="exception_approval",
         category="human_escalation",
-        expected="high-risk request pauses, approves once, and resumes without replay",
+        expected="exception case pauses, approves once, and resumes without replay",
         observed=completed.status.value,
         checks={
             "completed_as_expected": completed.status is WorkflowStatus.COMPLETED,
             "expected_path": (
                 paused.status is WorkflowStatus.WAITING_FOR_HUMAN
-                and completed.node_runs["low_risk_finalize"].status is NodeStatus.SKIPPED
-                and completed.node_runs["high_risk_finalize"].status is NodeStatus.COMPLETED
+                and completed.node_runs["onboarding_ready"].status is NodeStatus.SKIPPED
+                and completed.node_runs["reviewed_onboarding"].status is NodeStatus.COMPLETED
             ),
             "escalation_behavior": (
                 len(paused.human_reviews) == 1
@@ -264,25 +267,21 @@ def _evaluate_high_risk_approval() -> EvaluationCaseResult:
     )
 
 
-def _evaluate_high_risk_rejection() -> EvaluationCaseResult:
-    workflow = build_service_request_workflow()
-    registry = build_service_request_registry()
+def _evaluate_exception_rejection() -> EvaluationCaseResult:
+    workflow = build_onboarding_workflow()
+    registry = build_onboarding_registry()
     store = InMemoryStateStore()
     paused = execute_workflow(
         workflow,
         registry,
-        context=example_request(
-            request_id="EVAL-HIGH-REJECT",
-            risk_level="HIGH",
-            estimated_cost=1_250.0,
-        ),
-        run_id="eval-high-reject",
+        context=_exception_context("EVAL-EXCEPTION-REJECT"),
+        run_id="eval-exception-reject",
         state_store=store,
     )
     rejected = submit_human_decision(
         workflow,
         registry,
-        run_id="eval-high-reject",
+        run_id="eval-exception-reject",
         review_id=paused.human_reviews[0].review_id,
         decision=HumanDecision.REJECT,
         state_store=store,
@@ -290,14 +289,14 @@ def _evaluate_high_risk_rejection() -> EvaluationCaseResult:
     event_types = _event_types(rejected)
 
     return _result(
-        case_id="high_risk_rejection",
+        case_id="exception_rejection",
         category="human_escalation",
-        expected="human rejection ends as REJECTED without downstream finalization",
+        expected="human rejection ends as REJECTED without reviewed-ready finalization",
         observed=rejected.status.value,
         checks={
             "expected_path": (
                 rejected.status is WorkflowStatus.REJECTED
-                and rejected.node_runs["high_risk_finalize"].status is NodeStatus.PENDING
+                and rejected.node_runs["reviewed_onboarding"].status is NodeStatus.PENDING
             ),
             "escalation_behavior": EventType.HUMAN_REJECTED in event_types,
             "audit_complete": (
@@ -311,15 +310,15 @@ def _evaluate_high_risk_rejection() -> EvaluationCaseResult:
 
 
 def _evaluate_validation_failure() -> EvaluationCaseResult:
-    request = example_request(request_id="EVAL-INVALID")
-    request["description"] = "   "
+    onboarding = example_onboarding(household_id="EVAL-INVALID")
+    onboarding["onboarding_notes"] = "   "
     failed_run: WorkflowRun | None = None
 
     try:
         execute_workflow(
-            build_service_request_workflow(),
-            build_service_request_registry(),
-            context=request,
+            build_onboarding_workflow(),
+            build_onboarding_registry(),
+            context=onboarding,
             run_id="eval-invalid",
             state_store=InMemoryStateStore(),
         )
@@ -329,15 +328,15 @@ def _evaluate_validation_failure() -> EvaluationCaseResult:
     contained = (
         failed_run is not None
         and failed_run.status is WorkflowStatus.FAILED
-        and failed_run.node_runs["validate_request"].status is NodeStatus.FAILED
-        and failed_run.node_runs["classify_request"].status is NodeStatus.PENDING
-        and failed_run.node_runs["perform_automated_task"].attempt == 0
+        and failed_run.node_runs["validate_intake"].status is NodeStatus.FAILED
+        and failed_run.node_runs["ai_intake_organizer"].status is NodeStatus.PENDING
+        and failed_run.node_runs["create_onboarding_package"].attempt == 0
     )
 
     return _result(
         case_id="validation_failure",
         category="failure_containment",
-        expected="invalid input fails before classification or automated action",
+        expected="invalid intake fails before AI organization or package preparation",
         observed=failed_run.status.value if failed_run else "NO_FAILURE",
         checks={
             "failure_contained": contained,
@@ -359,10 +358,10 @@ def _evaluate_permanent_failure() -> EvaluationCaseResult:
 
     try:
         execute_workflow(
-            build_service_request_workflow(),
-            build_service_request_registry(),
-            context=example_request(
-                request_id="EVAL-PERMANENT",
+            build_onboarding_workflow(),
+            build_onboarding_registry(),
+            context=example_onboarding(
+                household_id="EVAL-PERMANENT",
                 simulation_mode="PERMANENT",
             ),
             run_id="eval-permanent",
@@ -374,19 +373,19 @@ def _evaluate_permanent_failure() -> EvaluationCaseResult:
     event_types = _event_types(failed_run) if failed_run else []
     retry_ok = bool(
         failed_run
-        and failed_run.node_runs["perform_automated_task"].attempt == 1
+        and failed_run.node_runs["create_onboarding_package"].attempt == 1
         and EventType.RETRY_SCHEDULED not in event_types
     )
     contained = bool(
         failed_run
         and failed_run.status is WorkflowStatus.FAILED
-        and failed_run.node_runs["verify_result"].status is NodeStatus.PENDING
+        and failed_run.node_runs["verify_onboarding_package"].status is NodeStatus.PENDING
     )
 
     return _result(
         case_id="permanent_failure",
         category="failure_containment",
-        expected="permanent failure is not retried and blocks downstream work",
+        expected="permanent package-preparation failure is not retried and blocks downstream work",
         observed=failed_run.status.value if failed_run else "NO_FAILURE",
         checks={
             "retry_behavior": retry_ok,
@@ -417,14 +416,14 @@ class _StopAfterVerificationStore:
 
     def save(self, run: WorkflowRun) -> None:
         self.inner.save(run)
-        verify = run.node_runs.get("verify_result")
-        risk_gate = run.node_runs.get("risk_gate")
+        verify = run.node_runs.get("verify_onboarding_package")
+        review_gate = run.node_runs.get("review_gate")
         if (
             not self.triggered
             and verify is not None
-            and risk_gate is not None
+            and review_gate is not None
             and verify.status is NodeStatus.COMPLETED
-            and risk_gate.status is NodeStatus.PENDING
+            and review_gate.status is NodeStatus.PENDING
         ):
             self.triggered = True
             raise _SimulatedProcessStop()
@@ -434,8 +433,8 @@ class _StopAfterVerificationStore:
 
 
 def _evaluate_checkpoint_resume() -> EvaluationCaseResult:
-    workflow = build_service_request_workflow()
-    registry = build_service_request_registry()
+    workflow = build_onboarding_workflow()
+    registry = build_onboarding_registry()
     store = _StopAfterVerificationStore()
     stopped = False
 
@@ -443,7 +442,7 @@ def _evaluate_checkpoint_resume() -> EvaluationCaseResult:
         execute_workflow(
             workflow,
             registry,
-            context=example_request(request_id="EVAL-RESUME"),
+            context=example_onboarding(household_id="EVAL-RESUME"),
             run_id="eval-resume",
             state_store=store,
         )
@@ -458,11 +457,12 @@ def _evaluate_checkpoint_resume() -> EvaluationCaseResult:
         state_store=store,
     )
     completed_before_stop = (
-        "validate_request",
-        "classify_request",
+        "validate_intake",
+        "ai_intake_organizer",
+        "document_check",
         "policy_check",
-        "perform_automated_task",
-        "verify_result",
+        "create_onboarding_package",
+        "verify_onboarding_package",
     )
     duplicate_executions = sum(
         max(0, resumed.node_runs[node_id].attempt - 1)
@@ -472,14 +472,14 @@ def _evaluate_checkpoint_resume() -> EvaluationCaseResult:
     return _result(
         case_id="checkpoint_resume",
         category="persistence",
-        expected="safe checkpoint resumes without repeating completed nodes",
+        expected="safe checkpoint resumes without repeating completed onboarding nodes",
         observed=resumed.status.value,
         checks={
             "completed_as_expected": resumed.status is WorkflowStatus.COMPLETED,
             "checkpoint_resume": (
                 stopped
-                and checkpoint.node_runs["verify_result"].status is NodeStatus.COMPLETED
-                and checkpoint.node_runs["risk_gate"].status is NodeStatus.PENDING
+                and checkpoint.node_runs["verify_onboarding_package"].status is NodeStatus.COMPLETED
+                and checkpoint.node_runs["review_gate"].status is NodeStatus.PENDING
                 and duplicate_executions == 0
             ),
             "audit_complete": _has_events(
@@ -500,17 +500,17 @@ def _evaluate_model_control_injection() -> EvaluationCaseResult:
 
     def malicious_model(prompt: str) -> str:
         return (
-            '{"classification":"ACCESS_REQUEST",'
-            f'"rationale":"{marker}",'
-            '"route":"HIGH_RISK","handler":"arbitrary_handler"}'
+            '{"profile_category":"STANDARD_HOUSEHOLD",'
+            f'"summary":"{marker}",'
+            '"route":"REVIEW_REQUIRED","handler":"arbitrary_handler"}'
         )
 
     failed_run: WorkflowRun | None = None
     try:
         execute_workflow(
-            build_service_request_workflow(),
-            build_service_request_registry(classification_model=malicious_model),
-            context=example_request(request_id="EVAL-MODEL-INJECT"),
+            build_onboarding_workflow(),
+            build_onboarding_registry(onboarding_model=malicious_model),
+            context=example_onboarding(household_id="EVAL-MODEL-INJECT"),
             run_id="eval-model-inject",
             state_store=InMemoryStateStore(),
         )
@@ -521,9 +521,9 @@ def _evaluate_model_control_injection() -> EvaluationCaseResult:
     contained = bool(
         failed_run
         and failed_run.status is WorkflowStatus.FAILED
-        and failed_run.node_runs["classify_request"].status is NodeStatus.FAILED
-        and failed_run.node_runs["policy_check"].status is NodeStatus.PENDING
-        and failed_run.node_runs["risk_gate"].status is NodeStatus.PENDING
+        and failed_run.node_runs["ai_intake_organizer"].status is NodeStatus.FAILED
+        and failed_run.node_runs["document_check"].status is NodeStatus.PENDING
+        and failed_run.node_runs["review_gate"].status is NodeStatus.PENDING
     )
     model_contained = contained and marker not in audit_text and "arbitrary_handler" not in audit_text
 
@@ -589,25 +589,19 @@ def _evaluate_invalid_dag() -> EvaluationCaseResult:
         category="adversarial",
         expected="cyclic graph is rejected before any handler executes",
         observed="REJECTED_BEFORE_EXECUTION" if rejected else "NOT_REJECTED",
-        checks={
-            "failure_contained": rejected and handler_calls == 0,
-        },
+        checks={"failure_contained": rejected and handler_calls == 0},
         details={"invalid_transitions": 0, "duplicate_executions": 0},
     )
 
 
 def _evaluate_human_gate_bypass() -> EvaluationCaseResult:
-    workflow = build_service_request_workflow()
-    registry = build_service_request_registry()
+    workflow = build_onboarding_workflow()
+    registry = build_onboarding_registry()
     store = InMemoryStateStore()
     paused = execute_workflow(
         workflow,
         registry,
-        context=example_request(
-            request_id="EVAL-BYPASS",
-            risk_level="HIGH",
-            estimated_cost=1_500.0,
-        ),
+        context=_exception_context("EVAL-BYPASS"),
         run_id="eval-bypass",
         state_store=store,
     )
@@ -628,14 +622,14 @@ def _evaluate_human_gate_bypass() -> EvaluationCaseResult:
     return _result(
         case_id="human_gate_bypass",
         category="adversarial",
-        expected="plain resume cannot bypass a waiting human approval gate",
+        expected="plain resume cannot bypass a waiting onboarding human-review gate",
         observed=unchanged.status.value,
         checks={
             "escalation_behavior": (
                 paused.status is WorkflowStatus.WAITING_FOR_HUMAN
                 and bypass_blocked
                 and unchanged.status is WorkflowStatus.WAITING_FOR_HUMAN
-                and unchanged.node_runs["high_risk_finalize"].status is NodeStatus.PENDING
+                and unchanged.node_runs["reviewed_onboarding"].status is NodeStatus.PENDING
             ),
             "failure_contained": bypass_blocked,
             "audit_complete": (
