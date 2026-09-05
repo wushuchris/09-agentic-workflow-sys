@@ -34,7 +34,7 @@ BUSINESS_STEPS = [
     ("ai_intake_organizer", "🤖 AI Intake Organizer", "Organize synthetic notes into a bounded household profile and summary."),
     ("document_check", "Check onboarding documents", "Record whether the fictional document set is complete."),
     ("policy_check", "Apply onboarding rules", "Identify deterministic exception reasons that require extra review."),
-    ("create_onboarding_package", "Prepare the onboarding package", "Create a simulated package with bounded retry protection."),
+    ("create_onboarding_package", "Prepare the onboarding package", "Create a simulated package that includes the bounded AI work product."),
     ("verify_onboarding_package", "Verify the package", "Confirm the simulated onboarding package was prepared correctly."),
     ("review_gate", "Choose the review path", "Route only between the approved standard path and human-review path."),
     ("onboarding_ready", "Standard package ready", "Mark a straightforward fictional household ready for advisor review."),
@@ -43,10 +43,10 @@ BUSINESS_STEPS = [
 ]
 
 _EXCEPTION_LABELS = {
-    "MISSING_DOCUMENTS": "missing onboarding documents",
-    "IDENTITY_REVIEW_REQUIRED": "identity information needs review",
-    "COMPLEX_RELATIONSHIP": "the relationship is marked complex",
-    "SPECIAL_STRUCTURE": "the household uses a special structure",
+    "MISSING_DOCUMENTS": "Missing onboarding documents",
+    "IDENTITY_REVIEW_REQUIRED": "Identity information needs review",
+    "COMPLEX_RELATIONSHIP": "Relationship marked complex",
+    "SPECIAL_STRUCTURE": "Trust or entity structure",
 }
 
 
@@ -91,7 +91,7 @@ def business_outcome_html(run: WorkflowRun) -> str:
             "exception rules require operations or compliance review. Automation is paused "
             "and cannot mark the package ready on its own."
         )
-        takeaway = "Pattern shown: AI can organize intake, but people retain authority over exception decisions."
+        takeaway = "Pattern shown: AI contributes intake work product, but people retain authority over exception decisions."
     elif run.status is WorkflowStatus.REJECTED:
         tone = "rejected"
         eyebrow = "BUSINESS DECISION"
@@ -136,7 +136,7 @@ def business_outcome_html(run: WorkflowRun) -> str:
             "The intake was valid, the package was prepared and verified, and no deterministic "
             "exception rule required an additional operations/compliance checkpoint."
         )
-        takeaway = "Pattern shown: routine preparation can move automatically while consequential exceptions stay human-controlled."
+        takeaway = "Pattern shown: AI helps prepare the work product while deterministic rules control consequences."
     else:
         tone = "neutral"
         eyebrow = "WORKFLOW IN PROGRESS"
@@ -151,6 +151,131 @@ def business_outcome_html(run: WorkflowRun) -> str:
         f'<div class="outcome-body">{html.escape(body)}</div>'
         f'<div class="outcome-takeaway">{html.escape(takeaway)}</div>'
         "</div>"
+    )
+
+
+def ai_insight_html(run: WorkflowRun) -> str:
+    """Show the bounded AI work product and clearly distinguish live vs fallback mode."""
+
+    node = run.node_runs.get("ai_intake_organizer")
+    if node is None or not isinstance(node.output, dict):
+        if node is not None and node.status.value == "FAILED":
+            return (
+                '<div class="ai-result ai-result-failed">'
+                '<div class="panel-eyebrow">AI INTAKE ORGANIZER</div>'
+                '<div class="panel-title">The AI boundary failed safely</div>'
+                '<div class="panel-body">No unvalidated model output was allowed into the onboarding package or routing logic.</div>'
+                '</div>'
+            )
+        return (
+            '<div class="ai-result">'
+            '<div class="panel-eyebrow">AI INTAKE ORGANIZER</div>'
+            '<div class="panel-title">AI work product not available yet</div>'
+            '<div class="panel-body">Run a fictional household to see the bounded profile category and intake summary.</div>'
+            '</div>'
+        )
+
+    source = str(node.output.get("source", "UNKNOWN"))
+    category = str(node.output.get("profile_category", "UNKNOWN"))
+    summary = str(node.output.get("summary", ""))
+    model_id = str(node.output.get("model_id", ""))
+    live = source == "MODEL_ASSISTED"
+    mode_label = "LIVE HUGGING FACE MODEL" if live else "DETERMINISTIC FALLBACK"
+    model_line = f'<div class="ai-model">Model: {html.escape(model_id)}</div>' if model_id else ""
+    included = _ai_summary_included(run)
+    included_text = (
+        "The validated AI summary was included in the simulated onboarding package."
+        if included
+        else "The AI work product has not yet reached the package-preparation step."
+    )
+
+    return (
+        f'<div class="ai-result {"ai-result-live" if live else "ai-result-fallback"}">'
+        '<div class="panel-eyebrow">🤖 BOUNDED AI WORK PRODUCT</div>'
+        f'<div class="ai-mode">{html.escape(mode_label)}</div>'
+        f'{model_line}'
+        f'<div class="ai-category">Profile category: <strong>{html.escape(category)}</strong></div>'
+        f'<div class="ai-summary"><strong>Intake summary:</strong> {html.escape(summary)}</div>'
+        f'<div class="ai-used">✓ {html.escape(included_text)}</div>'
+        '<div class="ai-boundary">AI did not decide document completeness, exception rules, routing, retries, or approval.</div>'
+        '</div>'
+    )
+
+
+def routing_explanation_html(run: WorkflowRun) -> str:
+    """Explain exactly why deterministic code selected the current branch."""
+
+    gate = run.node_runs.get("review_gate")
+    if gate is None or not isinstance(gate.output, dict):
+        return (
+            '<div class="why-panel">'
+            '<div class="panel-eyebrow">WHY DID IT ROUTE HERE?</div>'
+            '<div class="panel-title">No routing decision has been made yet</div>'
+            '<div class="panel-body">The workflow must finish package preparation and verification before the deterministic review gate can choose a branch.</div>'
+            '</div>'
+        )
+
+    route = str(gate.output.get("route", ""))
+    reasons = [str(reason) for reason in gate.output.get("exception_reasons") or []]
+
+    if route == "STANDARD_PATH":
+        return (
+            '<div class="why-panel why-standard">'
+            '<div class="panel-eyebrow">WHY DID IT ROUTE HERE?</div>'
+            '<div class="panel-title">Standard path selected by code</div>'
+            '<div class="panel-body">The deterministic onboarding rules found no configured exception trigger. No human checkpoint was required for this fictional preparation flow.</div>'
+            '<div class="why-proof">✓ The AI summary did <strong>not</strong> choose this route.</div>'
+            '</div>'
+        )
+
+    items = "".join(
+        f'<li>{html.escape(_EXCEPTION_LABELS.get(reason, reason.replace("_", " ").title()))}</li>'
+        for reason in reasons
+    )
+    return (
+        '<div class="why-panel why-review">'
+        '<div class="panel-eyebrow">WHY DID IT ROUTE HERE?</div>'
+        '<div class="panel-title">Human review required by deterministic rules</div>'
+        '<div class="panel-body">The workflow found these configured exception conditions:</div>'
+        f'<ul class="why-list">{items}</ul>'
+        '<div class="why-proof">✓ These reasons come from structured inputs and code—not from the AI-generated summary.</div>'
+        '</div>'
+    )
+
+
+def workflow_path_html(run: WorkflowRun) -> str:
+    """Render a compact visual DAG with the actual path reflected by node state."""
+
+    main_nodes = [
+        ("validate_intake", "Validate"),
+        ("ai_intake_organizer", "🤖 AI organize"),
+        ("document_check", "Documents"),
+        ("policy_check", "Rules"),
+        ("create_onboarding_package", "Prepare package"),
+        ("verify_onboarding_package", "Verify"),
+        ("review_gate", "Review gate"),
+    ]
+    main_html = _flow_nodes(run, main_nodes)
+    standard_html = _flow_nodes(run, [("onboarding_ready", "✅ Standard ready")])
+    review_html = _flow_nodes(
+        run,
+        [
+            ("human_review", "👤 Human review"),
+            ("reviewed_onboarding", "✅ Ready after review"),
+        ],
+    )
+
+    return (
+        '<div class="workflow-map">'
+        '<div class="map-heading">Live workflow path</div>'
+        '<div class="map-subheading">Completed steps light up; the unused branch is muted. The blue-outlined node is the only AI-assisted step.</div>'
+        f'<div class="map-main">{main_html}</div>'
+        '<div class="map-split">'
+        f'<div class="map-branch"><div class="branch-label">STANDARD PATH</div>{standard_html}</div>'
+        f'<div class="map-branch"><div class="branch-label">EXCEPTION PATH</div>{review_html}</div>'
+        '</div>'
+        '<div class="map-legend">Blue outline = AI boundary · Green = completed · Amber = waiting · Red = stopped · Gray = not selected/not reached</div>'
+        '</div>'
     )
 
 
@@ -174,7 +299,7 @@ def business_journey_html(run: WorkflowRun) -> str:
     return (
         '<div class="journey-wrap">'
         '<div class="journey-heading">What happened, step by step</div>'
-        '<div class="journey-subheading">The AI step interprets intake only. Deterministic rules decide whether the fictional household stays on the standard path or pauses for a person.</div>'
+        '<div class="journey-subheading">The AI step creates useful intake work product. Deterministic rules decide whether the fictional household stays on the standard path or pauses for a person.</div>'
         f'<div class="journey-grid">{"".join(cards)}</div>'
         "</div>"
     )
@@ -286,6 +411,13 @@ def _package_attempts(run: WorkflowRun) -> int:
     return node.attempt if node is not None else 0
 
 
+def _ai_summary_included(run: WorkflowRun) -> bool:
+    node = run.node_runs.get("verify_onboarding_package")
+    if node is None or not isinstance(node.output, dict):
+        return False
+    return bool(node.output.get("ai_summary_included"))
+
+
 def _latest_review_decision(run: WorkflowRun) -> str | None:
     if not run.human_reviews:
         return None
@@ -331,20 +463,20 @@ def _friendly_node_detail(run: WorkflowRun, node_id: str) -> str | None:
         source = node.output.get("source")
         category = node.output.get("profile_category")
         if source == "MODEL_ASSISTED":
-            return f"A live bounded model organized the intake and proposed {category}; it did not receive routing or approval controls."
+            return f"A live bounded model organized the intake and proposed {category}; its validated summary was available to package preparation, not routing."
         if source == "DETERMINISTIC_FALLBACK":
-            return f"This is the AI-capable boundary. The public demo used the deterministic fallback and produced {category}; a live model can be connected without changing workflow control."
+            return f"This is the AI-capable boundary. The deterministic fallback produced {category}; the same validated output shape feeds package preparation."
 
     if node_id == "create_onboarding_package" and node.status.value == "COMPLETED":
         if node.attempt > 1:
-            return f"A temporary service problem occurred, but the bounded retry policy recovered in {node.attempt} attempts."
-        return "The fictional onboarding package was prepared on the first attempt."
+            return f"A temporary service problem occurred, but the bounded retry policy recovered in {node.attempt} attempts. The validated AI intake summary was retained as package work product."
+        return "The fictional onboarding package was prepared on the first attempt and included the validated AI intake work product."
 
     if node_id == "review_gate" and isinstance(node.output, dict):
         route = node.output.get("route")
         reasons = node.output.get("exception_reasons") or []
         if route == "REVIEW_REQUIRED":
-            friendly = [_EXCEPTION_LABELS.get(str(reason), str(reason).lower()) for reason in reasons]
+            friendly = [_EXCEPTION_LABELS.get(str(reason), str(reason).replace("_", " ").lower()) for reason in reasons]
             reason_text = ", ".join(friendly) if friendly else "an onboarding exception"
             return f"Deterministic rules found {reason_text}, so the standard-ready path was blocked."
         if route == "STANDARD_PATH":
@@ -370,6 +502,25 @@ def _friendly_node_detail(run: WorkflowRun, node_id: str) -> str | None:
     if node.status.value == "FAILED":
         return "The workflow contained the problem here and did not continue into later onboarding work."
     return None
+
+
+def _flow_nodes(run: WorkflowRun, nodes: list[tuple[str, str]]) -> str:
+    parts: list[str] = []
+    for index, (node_id, label) in enumerate(nodes):
+        if index:
+            parts.append('<span class="map-arrow">→</span>')
+        parts.append(_map_node(run, node_id, label))
+    return "".join(parts)
+
+
+def _map_node(run: WorkflowRun, node_id: str, label: str) -> str:
+    node = run.node_runs.get(node_id)
+    state = node.status.value.lower().replace("_", "-") if node is not None else "pending"
+    ai_class = " map-node-ai" if node_id == "ai_intake_organizer" else ""
+    return (
+        f'<span class="map-node map-node-{html.escape(state)}{ai_class}" '
+        f'title="{html.escape(node_id)}">{html.escape(label)}</span>'
+    )
 
 
 def _json_text(value: Any) -> str:
