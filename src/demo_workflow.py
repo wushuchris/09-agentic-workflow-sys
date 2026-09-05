@@ -29,7 +29,7 @@ def build_onboarding_workflow() -> WorkflowDefinition:
     return WorkflowDefinition(
         workflow_id="wealth-household-onboarding",
         name="Fictional Wealth Management Household Onboarding",
-        version="1.0",
+        version="1.1",
         nodes=[
             NodeDefinition(
                 node_id="validate_intake",
@@ -63,7 +63,7 @@ def build_onboarding_workflow() -> WorkflowDefinition:
                 name="Create Onboarding Package",
                 node_type=NodeType.TASK,
                 handler="create_onboarding_package",
-                depends_on=["policy_check"],
+                depends_on=["policy_check", "ai_intake_organizer"],
                 retry_policy=RetryPolicy(retryable=True, max_attempts=3),
             ),
             NodeDefinition(
@@ -117,6 +117,7 @@ def build_onboarding_workflow() -> WorkflowDefinition:
 def build_onboarding_registry(
     *,
     onboarding_model: ModelCall | None = None,
+    model_label: str | None = None,
 ) -> HandlerRegistry:
     """Return allowlisted handlers for the fictional onboarding demo.
 
@@ -189,11 +190,14 @@ def build_onboarding_registry(
         intake = payload["dependencies"]["validate_intake"]
 
         if onboarding_model is not None:
-            return organize_onboarding_with_model(
+            result = organize_onboarding_with_model(
                 onboarding_model,
                 household_type=intake["household_type"],
                 onboarding_notes=intake["onboarding_notes"],
             )
+            if model_label:
+                result["model_id"] = model_label
+            return result
 
         household_type = intake["household_type"]
         if household_type in SPECIAL_STRUCTURE_TYPES:
@@ -237,6 +241,7 @@ def build_onboarding_registry(
 
     def create_onboarding_package(payload: dict[str, Any]) -> dict[str, Any]:
         context = payload["context"]
+        ai_result = payload["dependencies"]["ai_intake_organizer"]
         household_id = str(context["household_id"]).strip()
         simulation_mode = str(context.get("simulation_mode", "NONE")).strip().upper()
         attempt = package_attempts.get(household_id, 0) + 1
@@ -251,6 +256,9 @@ def build_onboarding_registry(
             "package_status": "PREPARED",
             "service_attempt": attempt,
             "action": "SIMULATED_ONBOARDING_PACKAGE_PREPARATION",
+            "ai_profile_category": ai_result["profile_category"],
+            "ai_intake_summary": ai_result["summary"],
+            "ai_source": ai_result["source"],
         }
 
     def verify_onboarding_package(payload: dict[str, Any]) -> dict[str, Any]:
@@ -260,6 +268,7 @@ def build_onboarding_registry(
         return {
             "verified": True,
             "action": package["action"],
+            "ai_summary_included": bool(package.get("ai_intake_summary")),
         }
 
     def review_gate(payload: dict[str, Any]) -> dict[str, Any]:
