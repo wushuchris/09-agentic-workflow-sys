@@ -40,10 +40,7 @@ def create_review(
     )
     run.human_reviews = (*run.human_reviews, review)
 
-    details: dict[str, str] = {
-        "review_id": review.review_id,
-        "reason": reason,
-    }
+    details: dict[str, str] = {"review_id": review.review_id}
     if retry_of is not None:
         details["retry_of"] = retry_of
 
