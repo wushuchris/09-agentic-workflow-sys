@@ -4,10 +4,12 @@ from src.demo_workflow import (
     example_request,
 )
 from src.evaluation import run_evaluation_suite
-from src.executor import execute_workflow
+from src.executor import execute_workflow, submit_human_decision
 from src.persistence import InMemoryStateStore
-from src.schemas import WorkflowStatus
+from src.schemas import HumanDecision, WorkflowStatus
 from src.ui_presenters import (
+    business_journey_html,
+    business_outcome_html,
     evaluation_case_rows,
     evaluation_metric_rows,
     event_rows,
@@ -43,6 +45,46 @@ def test_run_bundle_exposes_runtime_views_without_workflow_context_in_events() -
     assert "SYNTHETIC_CONTEXT_MARKER" not in event_text
 
 
+def test_business_presenters_explain_low_risk_path_in_plain_english() -> None:
+    run = execute_workflow(
+        build_service_request_workflow(),
+        build_service_request_registry(),
+        context=example_request(request_id="UI-BUSINESS-LOW"),
+        run_id="ui-business-low-run",
+        state_store=InMemoryStateStore(),
+    )
+
+    outcome = business_outcome_html(run)
+    journey = business_journey_html(run)
+
+    assert "Completed automatically" in outcome
+    assert "no human review was needed" in outcome
+    assert "Finish automatically" in journey
+    assert "Not needed on this path" in journey
+    assert "technical" not in outcome.lower()
+
+
+def test_business_presenters_explain_retry_recovery_without_raw_errors() -> None:
+    run = execute_workflow(
+        build_service_request_workflow(),
+        build_service_request_registry(),
+        context=example_request(
+            request_id="UI-BUSINESS-RETRY",
+            simulation_mode="TRANSIENT_ONCE",
+        ),
+        run_id="ui-business-retry-run",
+        state_store=InMemoryStateStore(),
+    )
+
+    outcome = business_outcome_html(run)
+    journey = business_journey_html(run)
+
+    assert run.node_runs["perform_automated_task"].attempt == 2
+    assert "temporary problem" in outcome.lower()
+    assert "Recovered on attempt 2" in journey
+    assert "synthetic temporary service interruption" not in outcome
+
+
 def test_waiting_human_summary_and_review_rows_are_clear() -> None:
     run = execute_workflow(
         build_service_request_workflow(),
@@ -59,12 +101,45 @@ def test_waiting_human_summary_and_review_rows_are_clear() -> None:
 
     assert run.status is WorkflowStatus.WAITING_FOR_HUMAN
     assert "Action required" in run_summary(run)
+    assert "A person needs to decide" in business_outcome_html(run)
+    assert "Waiting for a person" in business_journey_html(run)
 
     rows = review_rows(run)
     assert len(rows) == 1
     assert rows[0][1] == "human_review"
     assert rows[0][2] == "OPEN"
     assert "requires explicit human approval" in rows[0][3]
+
+
+def test_business_presenter_explains_human_approved_completion() -> None:
+    workflow = build_service_request_workflow()
+    store = InMemoryStateStore()
+    run = execute_workflow(
+        workflow,
+        build_service_request_registry(),
+        context=example_request(
+            request_id="UI-HUMAN-APPROVED",
+            risk_level="HIGH",
+            estimated_cost=1_500.0,
+            priority="HIGH",
+        ),
+        run_id="ui-human-approved-run",
+        state_store=store,
+    )
+    review = run.human_reviews[0]
+
+    completed = submit_human_decision(
+        workflow,
+        build_service_request_registry(),
+        run_id=run.run_id,
+        review_id=review.review_id,
+        decision=HumanDecision.APPROVE,
+        state_store=store,
+    )
+
+    assert completed.status is WorkflowStatus.COMPLETED
+    assert "Completed after a person approved" in business_outcome_html(completed)
+    assert "Approved by a person" in business_journey_html(completed)
 
 
 def test_event_rows_preserve_append_only_event_order() -> None:
