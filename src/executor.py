@@ -1,9 +1,9 @@
-"""Basic deterministic workflow executor for TASK-only MVP execution.
+"""Deterministic sequential workflow executor for TASK-node execution.
 
-This executor intentionally supports only sequential TASK-node execution. Retry
-handling, persistence, human gates, branching semantics, and live model calls are
-added in later layers. Structured audit events are emitted for every meaningful
-state transition.
+The executor validates the DAG, resolves only allowlisted handlers, emits structured
+audit events, and enforces bounded retries for explicitly retryable failures.
+Persistence, human gates, branching semantics, and live model calls are added in
+later layers.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from src.events import record_event
 from src.registry import HandlerRegistry
+from src.retry import should_retry
 from src.schemas import (
     EventType,
     NodeDefinition,
@@ -46,8 +47,9 @@ def execute_workflow(
 
     Each handler receives a structured payload containing the node configuration,
     shared workflow context, and outputs from declared dependencies. The handler
-    must return a dictionary. Any execution failure marks the workflow FAILED and
-    raises WorkflowExecutionError carrying the failed WorkflowRun for inspection.
+    must return a dictionary. Explicitly retryable failures may be attempted again
+    only within the node's bounded RetryPolicy. Terminal failures raise
+    WorkflowExecutionError carrying the failed WorkflowRun for inspection.
 
     Audit events intentionally contain control metadata rather than full context or
     handler outputs, reducing the chance that the audit trail becomes a data leak.
@@ -109,17 +111,6 @@ def _execute_task_node(
             f"TASK node '{node.node_id}' must declare a handler",
         )
 
-    node_run.status = NodeStatus.RUNNING
-    node_run.attempt = 1
-    node_run.started_at = utc_now()
-    run.updated_at = node_run.started_at
-    record_event(
-        run,
-        EventType.NODE_STARTED,
-        node_id=node.node_id,
-        details={"handler": node.handler, "attempt": node_run.attempt},
-    )
-
     dependency_outputs = {
         dependency_id: run.node_runs[dependency_id].output
         for dependency_id in node.depends_on
@@ -131,43 +122,86 @@ def _execute_task_node(
         "node_id": node.node_id,
     }
 
-    try:
-        handler = registry.resolve(node.handler)
-        output = handler(payload)
-        if not isinstance(output, dict):
-            raise TypeError("handler output must be a dictionary")
-    except Exception as exc:
-        node_run.status = NodeStatus.FAILED
-        node_run.error = str(exc)
+    while True:
+        node_run.status = NodeStatus.RUNNING
+        node_run.attempt += 1
+        node_run.error = None
+        node_run.completed_at = None
+        node_run.started_at = utc_now()
+        run.status = WorkflowStatus.RUNNING
+        run.updated_at = node_run.started_at
+        record_event(
+            run,
+            EventType.NODE_STARTED,
+            node_id=node.node_id,
+            details={"handler": node.handler, "attempt": node_run.attempt},
+        )
+
+        try:
+            handler = registry.resolve(node.handler)
+            output = handler(payload)
+            if not isinstance(output, dict):
+                raise TypeError("handler output must be a dictionary")
+        except Exception as exc:
+            retry = should_retry(
+                node.retry_policy,
+                attempt=node_run.attempt,
+                error=exc,
+            )
+            node_run.error = str(exc)
+            run.updated_at = utc_now()
+            record_event(
+                run,
+                EventType.NODE_FAILED,
+                node_id=node.node_id,
+                details={
+                    "attempt": node_run.attempt,
+                    "error": str(exc),
+                    "will_retry": retry,
+                },
+            )
+
+            if retry:
+                node_run.status = NodeStatus.RETRY_SCHEDULED
+                run.status = WorkflowStatus.RETRY_SCHEDULED
+                record_event(
+                    run,
+                    EventType.RETRY_SCHEDULED,
+                    node_id=node.node_id,
+                    details={
+                        "attempt": node_run.attempt,
+                        "next_attempt": node_run.attempt + 1,
+                        "max_attempts": node.retry_policy.max_attempts,
+                    },
+                )
+                continue
+
+            node_run.status = NodeStatus.FAILED
+            node_run.completed_at = utc_now()
+            run.status = WorkflowStatus.FAILED
+            run.updated_at = node_run.completed_at
+            record_event(
+                run,
+                EventType.WORKFLOW_FAILED,
+                details={"failed_node": node.node_id},
+            )
+            raise WorkflowExecutionError(
+                f"node '{node.node_id}' failed: {exc}",
+                run,
+            ) from exc
+
+        node_run.output = output
+        node_run.error = None
+        node_run.status = NodeStatus.COMPLETED
         node_run.completed_at = utc_now()
-        run.status = WorkflowStatus.FAILED
         run.updated_at = node_run.completed_at
         record_event(
             run,
-            EventType.NODE_FAILED,
+            EventType.NODE_COMPLETED,
             node_id=node.node_id,
-            details={"attempt": node_run.attempt, "error": str(exc)},
+            details={"attempt": node_run.attempt},
         )
-        record_event(
-            run,
-            EventType.WORKFLOW_FAILED,
-            details={"failed_node": node.node_id},
-        )
-        raise WorkflowExecutionError(
-            f"node '{node.node_id}' failed: {exc}",
-            run,
-        ) from exc
-
-    node_run.output = output
-    node_run.status = NodeStatus.COMPLETED
-    node_run.completed_at = utc_now()
-    run.updated_at = node_run.completed_at
-    record_event(
-        run,
-        EventType.NODE_COMPLETED,
-        node_id=node.node_id,
-        details={"attempt": node_run.attempt},
-    )
+        return
 
 
 def _mark_preexecution_failure(
@@ -184,7 +218,7 @@ def _mark_preexecution_failure(
         run,
         EventType.NODE_FAILED,
         node_id=node_run.node_id,
-        details={"attempt": node_run.attempt, "error": message},
+        details={"attempt": node_run.attempt, "error": message, "will_retry": False},
     )
     record_event(
         run,
