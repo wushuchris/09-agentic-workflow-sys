@@ -161,7 +161,7 @@ The sixth requirement introduces **idempotency**, a core reliability property fo
 
 ## Model Boundary
 
-The service-request classifier now supports an optional **bounded model-assisted mode**.
+The service-request classifier supports an optional **bounded model-assisted mode**.
 
 The model receives only the request type and description needed for classification. It returns strict JSON containing a classification from an application-defined allowlist plus a short rationale. Pydantic validates that proposal before the workflow accepts it.
 
@@ -190,24 +190,54 @@ The model is not permitted to:
 
 Malformed model output, invented classifications, extra control fields, and provider failures are contained at the classification node. Rejected model text is not copied into audit-event details.
 
-## Evaluation Focus
+## Evaluation Suite
 
-Evaluation emphasizes workflow correctness rather than prose quality.
+The project includes a reusable deterministic evaluation harness in `src/evaluation.py`. It runs the workflow through ten named scenarios and returns a structured `EvaluationReport` that can later be displayed directly in the Gradio UI or enforced in CI.
 
-Planned metrics include:
+Current scenarios cover:
 
+- normal low-risk automatic completion,
+- transient failure with bounded retry and recovery,
+- high-risk escalation followed by approval,
+- high-risk escalation followed by rejection,
+- invalid input containment,
+- permanent failure without unsafe retry,
+- checkpoint reload and resume without replay,
+- adversarial model attempts to inject workflow-control fields,
+- cyclic DAG rejection before handler execution,
+- and attempts to bypass a human gate through ordinary resume.
+
+The harness measures:
+
+- overall case pass rate,
 - workflow completion rate,
 - expected-path accuracy,
-- invalid-transition count,
 - retry correctness,
 - escalation correctness,
 - checkpoint/resume success,
-- duplicate-execution count,
 - audit-log completeness,
-- model-output containment,
-- and failure-containment rate.
+- failure-containment rate,
+- model-output containment rate,
+- duplicate-execution count,
+- and invalid-transition count.
 
-Planned tests cover success paths, malformed workflow definitions, retry exhaustion, permanent failures, invalid structured outputs, human escalation, duplicate events, persistence/recovery, and adversarial attempts to bypass workflow controls.
+The deterministic validation target is:
+
+```text
+overall case pass rate          1.00
+workflow completion rate       1.00
+expected-path accuracy          1.00
+retry correctness              1.00
+escalation correctness         1.00
+checkpoint/resume success      1.00
+audit-log completeness         1.00
+failure-containment rate       1.00
+model-output containment       1.00
+duplicate execution count      0
+invalid transition count       0
+```
+
+A focused local execution check of the ten evaluation scenarios passed 10/10. GitHub Actions CI is intentionally added later in the build sequence, so this is not yet presented as a CI result.
 
 ## Initial Project Structure
 
@@ -242,4 +272,4 @@ Implementation is being added incrementally in small, testable changes.
 
 ## Status
 
-**Current phase:** Deterministic workflow engine, synthetic service-request workflow, and bounded provider-agnostic model-assisted classification are implemented. Full evaluation, live provider integration, UI, and deployment remain.
+**Current phase:** Deterministic workflow engine, synthetic service-request workflow, bounded provider-agnostic model-assisted classification, and the structured evaluation harness are implemented. Gradio UI, live provider integration, CI, and deployment remain.
