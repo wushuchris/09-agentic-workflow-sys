@@ -1,8 +1,8 @@
 """Structured domain models for the Agentic Workflow System.
 
 These schemas define the valid vocabulary for workflow definitions, runtime state,
-events, retries, and human review. They intentionally do not perform graph-level
-DAG validation; that belongs to the workflow validator layer.
+events, retries, routing, and human review. They intentionally do not perform
+cross-node DAG validation; that belongs to the workflow validator layer.
 """
 
 from __future__ import annotations
@@ -59,6 +59,8 @@ class EventType(str, Enum):
     NODE_STARTED = "NODE_STARTED"
     NODE_COMPLETED = "NODE_COMPLETED"
     NODE_FAILED = "NODE_FAILED"
+    NODE_SKIPPED = "NODE_SKIPPED"
+    DECISION_ROUTED = "DECISION_ROUTED"
     RETRY_SCHEDULED = "RETRY_SCHEDULED"
     HUMAN_REVIEW_REQUESTED = "HUMAN_REVIEW_REQUESTED"
     HUMAN_APPROVED = "HUMAN_APPROVED"
@@ -96,11 +98,36 @@ class NodeDefinition(StrictModel):
     handler: str | None = Field(default=None, min_length=1, max_length=200)
     depends_on: list[str] = Field(default_factory=list)
     retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
+    routes: dict[str, str] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_decision_contract(self) -> "NodeDefinition":
+        if self.node_type is not NodeType.DECISION:
+            if self.routes:
+                raise ValueError("routes are only allowed on DECISION nodes")
+            return self
+
+        if self.handler is None:
+            raise ValueError("DECISION nodes must declare a handler")
+        if len(self.routes) < 2:
+            raise ValueError("DECISION nodes must declare at least two routes")
+
+        targets: list[str] = []
+        for route_label, target_node_id in self.routes.items():
+            if not route_label.strip() or len(route_label) > 100:
+                raise ValueError("decision route labels must be 1-100 non-blank characters")
+            if not target_node_id.strip() or len(target_node_id) > 100:
+                raise ValueError("decision route targets must be 1-100 non-blank characters")
+            targets.append(target_node_id)
+
+        if len(set(targets)) != len(targets):
+            raise ValueError("DECISION route targets must be unique")
+        return self
 
 
 class WorkflowDefinition(StrictModel):
-    """Static workflow definition supplied to the future DAG validator/executor."""
+    """Static workflow definition supplied to the DAG validator/executor."""
 
     workflow_id: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=200)
