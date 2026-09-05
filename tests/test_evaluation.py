@@ -2,10 +2,10 @@ from src.evaluation import EvaluationReport, run_evaluation_suite
 
 
 EXPECTED_CASE_IDS = {
-    "normal_low_risk",
+    "straightforward_onboarding",
     "transient_retry_recovery",
-    "high_risk_approval",
-    "high_risk_rejection",
+    "exception_approval",
+    "exception_rejection",
     "validation_failure",
     "permanent_failure",
     "checkpoint_resume",
@@ -69,6 +69,6 @@ def test_checkpoint_and_adversarial_cases_report_zero_duplicate_execution() -> N
     cases = {case.case_id: case for case in report.cases}
 
     assert cases["checkpoint_resume"].details["duplicate_executions"] == 0
-    assert cases["high_risk_approval"].details["duplicate_executions"] == 0
+    assert cases["exception_approval"].details["duplicate_executions"] == 0
     assert cases["model_control_injection"].checks["model_contained"] is True
     assert cases["human_gate_bypass"].checks["failure_contained"] is True
