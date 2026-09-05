@@ -192,7 +192,7 @@ Malformed model output, invented classifications, extra control fields, and prov
 
 ## Evaluation Suite
 
-The project includes a reusable deterministic evaluation harness in `src/evaluation.py`. It runs the workflow through ten named scenarios and returns a structured `EvaluationReport` that can later be displayed directly in the Gradio UI or enforced in CI.
+The project includes a reusable deterministic evaluation harness in `src/evaluation.py`. It runs the workflow through ten named scenarios and returns a structured `EvaluationReport` that can be displayed directly in the Gradio UI or enforced in CI.
 
 Current scenarios cover:
 
@@ -239,9 +239,28 @@ invalid transition count       0
 
 A focused local execution check of the ten evaluation scenarios passed 10/10. GitHub Actions CI is intentionally added later in the build sequence, so this is not yet presented as a CI result.
 
-## Initial Project Structure
+## Gradio Demo
+
+`app.py` provides a thin Gradio interface over the same runtime used by the tests. Workflow control is not duplicated inside the UI.
+
+The demo exposes:
+
+- **Run Workflow** — submit a fictional service request and deliberately exercise normal, retry, high-risk, or permanent-failure paths,
+- **Status & Node Results** — inspect node state, attempts, errors, and structured outputs,
+- **Event Timeline** — inspect append-only control-plane audit events without copying workflow context into event details,
+- **Human Approval** — apply `APPROVE`, `REJECT`, or `RETRY` to an open durable review,
+- **Evaluation Results** — run the reusable ten-case evaluation harness and display system-level metrics.
+
+Each new workflow execution receives a random run ID. The app stores checkpoints in SQLite and can reload a run by ID so a waiting human gate can survive ordinary UI interaction and process-level workflow pauses. The local database filename is gitignored, and `WORKFLOW_DB_PATH` can override its location at deployment time.
+
+The deterministic workflow remains the public-demo default, so the Gradio app does not require a model token. Live provider networking is intentionally kept as a separate later integration step.
+
+Local SQLite persistence is appropriate for this portfolio demo, but it is not presented as multi-tenant production storage. Persistence across hosting-environment restarts depends on the storage configuration of the eventual deployment environment.
+
+## Project Structure
 
 ```text
+app.py
 README.md
 requirements.txt
 .env.example
@@ -272,4 +291,4 @@ Implementation is being added incrementally in small, testable changes.
 
 ## Status
 
-**Current phase:** Deterministic workflow engine, synthetic service-request workflow, bounded provider-agnostic model-assisted classification, and the structured evaluation harness are implemented. Gradio UI, live provider integration, CI, and deployment remain.
+**Current phase:** Deterministic workflow engine, synthetic service-request workflow, bounded provider-agnostic model-assisted classification, structured evaluation harness, and Gradio demo are implemented. Live provider integration, CI, Hugging Face deployment, and production validation remain.
