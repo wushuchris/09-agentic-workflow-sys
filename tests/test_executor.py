@@ -3,6 +3,7 @@ import pytest
 from src.executor import WorkflowExecutionError, execute_workflow
 from src.registry import HandlerRegistry
 from src.schemas import (
+    EventType,
     NodeDefinition,
     NodeStatus,
     NodeType,
@@ -237,3 +238,87 @@ def test_task_without_handler_is_rejected_before_execution() -> None:
     assert run.status is WorkflowStatus.FAILED
     assert run.node_runs["task"].status is NodeStatus.FAILED
     assert run.node_runs["task"].attempt == 0
+
+
+def test_successful_execution_emits_complete_ordered_audit_history() -> None:
+    registry = HandlerRegistry()
+
+    def handler(payload: dict) -> dict:
+        return {"ok": True}
+
+    registry.register("handler", handler)
+    workflow = make_workflow(
+        [
+            NodeDefinition(
+                node_id="first",
+                name="First",
+                node_type=NodeType.TASK,
+                handler="handler",
+            ),
+            NodeDefinition(
+                node_id="second",
+                name="Second",
+                node_type=NodeType.TASK,
+                handler="handler",
+                depends_on=["first"],
+            ),
+        ]
+    )
+
+    run = execute_workflow(workflow, registry, run_id="audit-success")
+
+    assert [event.event_type for event in run.events] == [
+        EventType.WORKFLOW_STARTED,
+        EventType.NODE_STARTED,
+        EventType.NODE_COMPLETED,
+        EventType.NODE_STARTED,
+        EventType.NODE_COMPLETED,
+        EventType.WORKFLOW_COMPLETED,
+    ]
+    assert [event.node_id for event in run.events] == [
+        None,
+        "first",
+        "first",
+        "second",
+        "second",
+        None,
+    ]
+    assert all(event.run_id == "audit-success" for event in run.events)
+
+
+def test_failed_execution_emits_failure_events_without_sensitive_payloads() -> None:
+    registry = HandlerRegistry()
+
+    def fail_handler(payload: dict) -> dict:
+        raise RuntimeError("synthetic failure")
+
+    registry.register("fail", fail_handler)
+    workflow = make_workflow(
+        [
+            NodeDefinition(
+                node_id="task",
+                name="Task",
+                node_type=NodeType.TASK,
+                handler="fail",
+            )
+        ]
+    )
+
+    with pytest.raises(WorkflowExecutionError) as exc_info:
+        execute_workflow(
+            workflow,
+            registry,
+            context={"private_note": "do not copy into audit log"},
+            run_id="audit-failure",
+        )
+
+    run = exc_info.value.run
+    assert [event.event_type for event in run.events] == [
+        EventType.WORKFLOW_STARTED,
+        EventType.NODE_STARTED,
+        EventType.NODE_FAILED,
+        EventType.WORKFLOW_FAILED,
+    ]
+    audit_text = repr([event.details for event in run.events])
+    assert "private_note" not in audit_text
+    assert "do not copy into audit log" not in audit_text
