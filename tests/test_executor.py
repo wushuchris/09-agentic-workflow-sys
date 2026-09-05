@@ -198,14 +198,14 @@ def test_handler_output_must_be_dictionary() -> None:
     assert exc_info.value.run.node_runs["task"].status is NodeStatus.FAILED
 
 
-def test_basic_executor_rejects_unsupported_node_type() -> None:
+def test_executor_rejects_unsupported_end_node_type() -> None:
     registry = HandlerRegistry()
     workflow = make_workflow(
         [
             NodeDefinition(
-                node_id="decision",
-                name="Decision",
-                node_type=NodeType.DECISION,
+                node_id="end",
+                name="End",
+                node_type=NodeType.END,
             )
         ]
     )
@@ -215,8 +215,8 @@ def test_basic_executor_rejects_unsupported_node_type() -> None:
 
     run = exc_info.value.run
     assert run.status is WorkflowStatus.FAILED
-    assert run.node_runs["decision"].status is NodeStatus.FAILED
-    assert run.node_runs["decision"].attempt == 0
+    assert run.node_runs["end"].status is NodeStatus.FAILED
+    assert run.node_runs["end"].attempt == 0
 
 
 def test_task_without_handler_is_rejected_before_execution() -> None:
