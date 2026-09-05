@@ -1,9 +1,9 @@
 """Deterministic sequential workflow executor with durable checkpoints.
 
 The executor validates the DAG, resolves only allowlisted handlers, emits structured
-audit events, enforces bounded retries, and can resume safe persisted checkpoints
-without re-running completed nodes. Human gates, branching semantics, and live model
-calls are added in later layers.
+audit events, enforces bounded retries, resumes safe checkpoints, and pauses durably
+at HUMAN_GATE nodes until an explicit human decision is submitted. Branching
+semantics and live model calls are added in later layers.
 """
 
 from __future__ import annotations
@@ -12,11 +12,14 @@ from typing import Any
 from uuid import uuid4
 
 from src.events import record_event
+from src.human import HumanReviewError, create_review, decide_review
 from src.persistence import StateStore
 from src.registry import HandlerRegistry
 from src.retry import should_retry
 from src.schemas import (
     EventType,
+    HumanDecision,
+    HumanReviewRequest,
     NodeDefinition,
     NodeRun,
     NodeStatus,
@@ -45,6 +48,14 @@ class WorkflowResumeError(RuntimeError):
         self.run = run
 
 
+class WorkflowHumanDecisionError(RuntimeError):
+    """Raised when a human decision cannot be applied safely."""
+
+    def __init__(self, message: str, run: WorkflowRun) -> None:
+        super().__init__(message)
+        self.run = run
+
+
 def execute_workflow(
     definition: WorkflowDefinition,
     registry: HandlerRegistry,
@@ -53,7 +64,7 @@ def execute_workflow(
     run_id: str | None = None,
     state_store: StateStore | None = None,
 ) -> WorkflowRun:
-    """Start and execute a validated TASK-only workflow sequentially."""
+    """Start and execute a validated workflow until completion or a human gate."""
 
     order = topological_order(definition)
     node_by_id = {node.node_id: node for node in definition.nodes}
@@ -93,12 +104,12 @@ def resume_workflow(
     run_id: str,
     state_store: StateStore,
 ) -> WorkflowRun:
-    """Resume a safe persisted checkpoint without repeating completed nodes.
+    """Resume a safe non-human checkpoint without repeating completed nodes.
 
-    Completed runs are returned unchanged, making resume idempotent. A node persisted
-    as RUNNING is deliberately not replayed automatically because its handler may
-    have produced side effects before the process stopped. That ambiguous case must
-    wait for a future idempotency/reconciliation layer or explicit human handling.
+    Completed runs are returned unchanged, making resume idempotent. A run waiting
+    at a HUMAN_GATE must use submit_human_decision instead of this function. A node
+    persisted as RUNNING is deliberately not replayed automatically because its
+    handler may have produced side effects before the process stopped.
     """
 
     order = topological_order(definition)
@@ -117,6 +128,120 @@ def resume_workflow(
         run,
         EventType.WORKFLOW_RESUMED,
         details={"previous_status": previous_status.value},
+    )
+    _checkpoint(state_store, run)
+
+    return _run_remaining_nodes(
+        definition,
+        registry,
+        run,
+        order=order,
+        node_by_id=node_by_id,
+        state_store=state_store,
+    )
+
+
+def submit_human_decision(
+    definition: WorkflowDefinition,
+    registry: HandlerRegistry,
+    *,
+    run_id: str,
+    review_id: str,
+    decision: HumanDecision | str,
+    state_store: StateStore,
+) -> WorkflowRun:
+    """Apply one explicit decision to a durable HUMAN_GATE checkpoint.
+
+    APPROVE completes the gate and resumes downstream execution. REJECT completes
+    the gate but terminates the overall workflow as REJECTED. RETRY records the
+    decision and opens a fresh review request for the same gate without replaying
+    upstream tasks.
+    """
+
+    order = topological_order(definition)
+    node_by_id = {node.node_id: node for node in definition.nodes}
+    run = state_store.load(run_id)
+
+    try:
+        normalized_decision = HumanDecision(decision)
+    except ValueError as exc:
+        raise WorkflowHumanDecisionError(
+            f"unknown human decision '{decision}'",
+            run,
+        ) from exc
+
+    try:
+        review = _validate_human_checkpoint(definition, run, review_id)
+        decided_review = decide_review(
+            run,
+            review_id=review_id,
+            decision=normalized_decision,
+        )
+    except (HumanReviewError, WorkflowResumeError) as exc:
+        raise WorkflowHumanDecisionError(str(exc), run) from exc
+
+    node = node_by_id[decided_review.node_id]
+    node_run = run.node_runs[node.node_id]
+    now = utc_now()
+
+    if normalized_decision is HumanDecision.RETRY:
+        retry_review = create_review(
+            run,
+            node_id=node.node_id,
+            reason=decided_review.reason,
+            retry_of=decided_review.review_id,
+        )
+        run.status = WorkflowStatus.WAITING_FOR_HUMAN
+        run.updated_at = now
+        _checkpoint(state_store, run)
+        return run
+
+    node_run.status = NodeStatus.COMPLETED
+    node_run.output = {
+        "decision": normalized_decision.value,
+        "review_id": decided_review.review_id,
+    }
+    node_run.error = None
+    node_run.completed_at = now
+    run.updated_at = now
+
+    if normalized_decision is HumanDecision.REJECT:
+        record_event(
+            run,
+            EventType.HUMAN_REJECTED,
+            node_id=node.node_id,
+            details={"review_id": decided_review.review_id},
+        )
+        record_event(
+            run,
+            EventType.NODE_COMPLETED,
+            node_id=node.node_id,
+            details={"human_decision": HumanDecision.REJECT.value},
+        )
+        run.status = WorkflowStatus.REJECTED
+        _checkpoint(state_store, run)
+        return run
+
+    record_event(
+        run,
+        EventType.HUMAN_APPROVED,
+        node_id=node.node_id,
+        details={"review_id": decided_review.review_id},
+    )
+    record_event(
+        run,
+        EventType.NODE_COMPLETED,
+        node_id=node.node_id,
+        details={"human_decision": HumanDecision.APPROVE.value},
+    )
+    run.status = WorkflowStatus.RUNNING
+    record_event(
+        run,
+        EventType.WORKFLOW_RESUMED,
+        details={
+            "previous_status": WorkflowStatus.WAITING_FOR_HUMAN.value,
+            "review_id": decided_review.review_id,
+        },
     )
     _checkpoint(state_store, run)
 
@@ -153,7 +278,20 @@ def _run_remaining_nodes(
                 run,
             )
 
-        _execute_task_node(node_by_id[node_id], run, registry, state_store)
+        node = node_by_id[node_id]
+        if node.node_type is NodeType.TASK:
+            _execute_task_node(node, run, registry, state_store)
+            continue
+        if node.node_type is NodeType.HUMAN_GATE:
+            return _pause_for_human_review(node, run, state_store)
+
+        _mark_preexecution_failure(
+            run,
+            node_run,
+            f"node '{node.node_id}' uses unsupported node type '{node.node_type.value}' "
+            "in the current executor",
+            state_store,
+        )
 
     run.status = WorkflowStatus.COMPLETED
     run.updated_at = utc_now()
@@ -167,6 +305,47 @@ def _run_remaining_nodes(
     return run
 
 
+def _pause_for_human_review(
+    node: NodeDefinition,
+    run: WorkflowRun,
+    state_store: StateStore | None,
+) -> WorkflowRun:
+    node_run = run.node_runs[node.node_id]
+
+    if state_store is None:
+        _mark_preexecution_failure(
+            run,
+            node_run,
+            f"HUMAN_GATE node '{node.node_id}' requires a state_store",
+            state_store,
+        )
+
+    reason = node.config.get("reason", node.name)
+    if not isinstance(reason, str) or not reason.strip():
+        _mark_preexecution_failure(
+            run,
+            node_run,
+            f"HUMAN_GATE node '{node.node_id}' requires a non-blank string reason",
+            state_store,
+        )
+
+    now = utc_now()
+    node_run.status = NodeStatus.WAITING_FOR_HUMAN
+    node_run.started_at = node_run.started_at or now
+    node_run.error = None
+    run.status = WorkflowStatus.WAITING_FOR_HUMAN
+    run.updated_at = now
+    record_event(
+        run,
+        EventType.NODE_STARTED,
+        node_id=node.node_id,
+        details={"node_type": NodeType.HUMAN_GATE.value},
+    )
+    create_review(run, node_id=node.node_id, reason=reason.strip())
+    _checkpoint(state_store, run)
+    return run
+
+
 def _execute_task_node(
     node: NodeDefinition,
     run: WorkflowRun,
@@ -174,15 +353,6 @@ def _execute_task_node(
     state_store: StateStore | None,
 ) -> None:
     node_run = run.node_runs[node.node_id]
-
-    if node.node_type is not NodeType.TASK:
-        _mark_preexecution_failure(
-            run,
-            node_run,
-            f"node '{node.node_id}' uses unsupported node type '{node.node_type.value}' "
-            "in the basic executor",
-            state_store,
-        )
 
     if node.handler is None:
         _mark_preexecution_failure(
@@ -315,7 +485,7 @@ def _mark_preexecution_failure(
     raise WorkflowExecutionError(message, run)
 
 
-def _validate_resume_checkpoint(
+def _validate_checkpoint_identity(
     definition: WorkflowDefinition,
     run: WorkflowRun,
 ) -> None:
@@ -340,8 +510,20 @@ def _validate_resume_checkpoint(
             run,
         )
 
+
+def _validate_resume_checkpoint(
+    definition: WorkflowDefinition,
+    run: WorkflowRun,
+) -> None:
+    _validate_checkpoint_identity(definition, run)
+
     if run.status is WorkflowStatus.COMPLETED:
         return
+    if run.status is WorkflowStatus.WAITING_FOR_HUMAN:
+        raise WorkflowResumeError(
+            "workflow is waiting for a human decision; use submit_human_decision",
+            run,
+        )
     if run.status not in {
         WorkflowStatus.PENDING,
         WorkflowStatus.RUNNING,
@@ -374,6 +556,57 @@ def _validate_resume_checkpoint(
                         f"'{dependency_id}'",
                         run,
                     )
+
+
+def _validate_human_checkpoint(
+    definition: WorkflowDefinition,
+    run: WorkflowRun,
+    review_id: str,
+) -> HumanReviewRequest:
+    _validate_checkpoint_identity(definition, run)
+
+    if run.status is not WorkflowStatus.WAITING_FOR_HUMAN:
+        raise WorkflowResumeError(
+            f"workflow run is not waiting for a human decision; status is "
+            f"'{run.status.value}'",
+            run,
+        )
+
+    review = next(
+        (item for item in run.human_reviews if item.review_id == review_id),
+        None,
+    )
+    if review is None:
+        raise HumanReviewError(f"human review '{review_id}' was not found")
+    if review.decision is not None:
+        raise HumanReviewError(
+            f"human review '{review_id}' already has decision '{review.decision.value}'"
+        )
+
+    node_by_id = {node.node_id: node for node in definition.nodes}
+    node = node_by_id[review.node_id]
+    if node.node_type is not NodeType.HUMAN_GATE:
+        raise WorkflowResumeError(
+            f"human review '{review_id}' does not reference a HUMAN_GATE node",
+            run,
+        )
+
+    node_run = run.node_runs[review.node_id]
+    if node_run.status is not NodeStatus.WAITING_FOR_HUMAN:
+        raise WorkflowResumeError(
+            f"human gate node '{review.node_id}' is not waiting for human input",
+            run,
+        )
+
+    for dependency_id in node.depends_on:
+        if run.node_runs[dependency_id].status is not NodeStatus.COMPLETED:
+            raise WorkflowResumeError(
+                f"human gate '{node.node_id}' has incomplete dependency "
+                f"'{dependency_id}'",
+                run,
+            )
+
+    return review
 
 
 def _checkpoint(state_store: StateStore | None, run: WorkflowRun) -> None:
