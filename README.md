@@ -22,17 +22,17 @@ A deterministic, resumable, and auditable workflow runtime for AI-assisted busin
 
 AI systems can perform individual tasks, but reliable business processes require more than model reasoning. Production workflows need explicit sequencing, validated state transitions, bounded retries, durable checkpoints, failure handling, human approval gates, and an auditable event history.
 
-This project explores that engineering boundary by building a small workflow runtime where models may assist with bounded tasks, but application code controls execution.
+This project explores that engineering boundary by building a small workflow runtime where AI can contribute useful work product while application code controls consequences.
 
 ## Core Engineering Principle
 
-> Models may propose and reason. Application code owns workflow state, validation, execution order, retries, escalation, and completion.
+> AI contributes work. Application code governs the process. Humans retain authority over consequential exceptions.
 
 The workflow engine—not the language model—decides what may run next.
 
 ## Demo Scenario — Fictional Wealth Management Household Onboarding
 
-The public demo follows a fully synthetic household through a hypothetical wealth-management onboarding process. It is designed to illustrate workflow engineering, not to represent any firm's real compliance program or to open an actual account.
+The public demo follows a fully synthetic household through a hypothetical wealth-management onboarding process. It illustrates workflow engineering; it does not represent any firm's actual compliance procedure and does not open a real account.
 
 ```text
 Synthetic household intake
@@ -40,12 +40,14 @@ Synthetic household intake
 Validate intake
           ↓
 🤖 AI Intake Organizer
+   profile + summary
           ↓
 Check documents
           ↓
 Apply deterministic onboarding rules
           ↓
 Prepare onboarding package
+(includes validated AI work product)
           ↓
 Verify package
           ↓
@@ -65,10 +67,12 @@ The demo contains no real clients, accounts, trades, KYC/AML service calls, mone
 
 ### Four one-click stories
 
-- **Straightforward household** — the fictional package becomes ready on the standard path.
-- **Temporary service problem** — package preparation fails once, retries within policy, and recovers.
-- **Trust / complex household** — deterministic exception rules pause the workflow for a person.
-- **Permanent dependency failure** — the workflow stops safely before uncertain downstream work runs.
+- **Harbor Family — straightforward household** — the fictional package becomes ready on the standard path.
+- **Harbor Family — temporary onboarding-service issue** — package preparation fails once, retries within policy, and recovers.
+- **Redwood Family Trust — human review required** — deterministic exception rules pause the workflow for a person.
+- **Cedar Household — permanent dependency failure** — the workflow stops safely before uncertain downstream work runs.
+
+All names and facts are synthetic.
 
 ## Where AI Is Implemented
 
@@ -91,12 +95,18 @@ synthetic intake notes
         ↓
 🤖 model proposes profile + summary
         ↓
-strict schema validation
+strict Pydantic validation
         ↓
-normalized bounded output
+validated bounded work product
         ↓
-deterministic workflow continues
+simulated onboarding package
 ```
+
+The validated AI work product is intentionally useful: package preparation includes the profile category and intake summary. The AI is therefore part of the business workflow rather than a decorative UI element.
+
+But the AI output is deliberately **non-authoritative**. The deterministic review gate ignores the model's profile category and summary. Routing is based only on application-controlled structured fields such as document completeness, identity-review status, relationship complexity, and special household structure.
+
+A regression test explicitly demonstrates that a model can propose `COMPLEX_HOUSEHOLD` while a case with no configured deterministic exception still remains on the standard path.
 
 The AI does **not** receive or control:
 
@@ -110,7 +120,40 @@ The AI does **not** receive or control:
 - workflow state,
 - or human approval decisions.
 
-The current public demo uses a deterministic fallback at this AI-capable node unless a live provider callable is connected. The provider boundary is deliberately separate from workflow control so a model can be added or changed without changing the engine's state-transition rules.
+## Live Hugging Face Inference
+
+`src/hf_provider.py` implements a small provider adapter around Hugging Face `InferenceClient`. The adapter knows only how to turn one prompt into one text response; it has no access to workflow state or routing.
+
+Live inference is deliberately opt-in. It requires both:
+
+```text
+LIVE_AI_ENABLED=true
+HF_TOKEN=<runtime secret>
+```
+
+The default model is configurable through `MODEL_ID`; the current example default is:
+
+```text
+Qwen/Qwen2.5-7B-Instruct-1M
+```
+
+If live inference is not explicitly enabled, the AI-capable node uses a clearly labeled deterministic fallback. The UI never claims a live model ran when it did not.
+
+The live provider output still passes through the same strict Pydantic boundary. Provider failures and invalid model output fail closed at the AI node rather than gaining workflow authority.
+
+## What the Business-Friendly UI Shows
+
+The landing experience is designed for both non-technical and technical visitors.
+
+After each run it shows, in this order:
+
+1. **Plain-English business outcome** — what happened to the fictional onboarding case.
+2. **Live workflow path** — completed steps light up while the unused branch is muted; the AI node is visually highlighted.
+3. **Bounded AI work product** — live vs fallback source, profile category, intake summary, and whether the validated summary reached the simulated package.
+4. **Why did it route here?** — the exact deterministic exception reasons that selected the standard or human-review path, with an explicit statement that the AI summary did not choose the route.
+5. **Step-by-step journey** — a readable translation of node state, retry recovery, and human decisions.
+
+Technical tabs preserve the underlying evidence: exact node state, structured outputs, append-only audit events, persisted human reviews, and the evaluation suite.
 
 ## Architecture
 
@@ -156,7 +199,7 @@ Human decisions:
 
 ### 8. Event and Audit Log
 
-Meaningful state transitions emit structured events so execution can be inspected and reconstructed. Audit events carry control metadata rather than copying onboarding notes into the event stream.
+Meaningful state transitions emit structured events so execution can be inspected and reconstructed. Audit events carry control metadata rather than copying onboarding notes or AI summaries into the event stream.
 
 ## Workflow States
 
@@ -193,8 +236,9 @@ The MVP demonstrates that:
 4. An exception household pauses for human review and resumes only after a valid decision.
 5. A partially completed workflow can reload from persisted state without repeating completed work.
 6. Duplicate completion or resume attempts do not cause duplicate downstream execution.
+7. AI output can contribute to the work product without controlling deterministic routing.
 
-The sixth requirement demonstrates **idempotency**, a core reliability property for workflow systems.
+The sixth requirement demonstrates **idempotency**. The seventh demonstrates **bounded AI authority**.
 
 ## Evaluation Suite
 
@@ -213,59 +257,15 @@ Current scenarios cover:
 - cyclic DAG rejection before handler execution,
 - and attempts to bypass a human gate through ordinary resume.
 
-The harness measures:
-
-- overall case pass rate,
-- workflow completion rate,
-- expected-path accuracy,
-- retry correctness,
-- escalation correctness,
-- checkpoint/resume success,
-- audit-log completeness,
-- failure-containment rate,
-- model-output containment rate,
-- duplicate-execution count,
-- and invalid-transition count.
-
-The deterministic validation target is:
-
-```text
-overall case pass rate          1.00
-workflow completion rate       1.00
-expected-path accuracy          1.00
-retry correctness              1.00
-escalation correctness         1.00
-checkpoint/resume success      1.00
-audit-log completeness         1.00
-failure-containment rate       1.00
-model-output containment       1.00
-duplicate execution count      0
-invalid transition count       0
-```
-
-## Gradio Demo
-
-`app.py` provides a thin Gradio interface over the same runtime used by the tests. Workflow control is not duplicated inside the UI.
-
-The landing page is intentionally understandable to non-technical visitors first:
-
-- a fictional wealth-management onboarding story,
-- a clearly highlighted AI Intake Organizer,
-- one-click standard, retry, exception, and permanent-failure scenarios,
-- a plain-English business outcome,
-- and a step-by-step explanation of what happened.
-
-Technical evidence remains available in separate views for node state, structured outputs, audit events, human decisions, persistence, and evaluation metrics.
-
-Each new workflow execution receives a random run ID. The app stores checkpoints in SQLite and can reload a run by ID so a waiting human gate can survive ordinary UI interaction and process-level workflow pauses. The local database filename is gitignored, and `WORKFLOW_DB_PATH` can override its location at deployment time.
-
-Local SQLite persistence is appropriate for this portfolio demo, but it is not presented as multi-tenant production storage. Persistence across hosting-environment restarts depends on the deployment environment's storage configuration.
+The harness measures overall case pass rate, workflow completion, expected-path accuracy, retry correctness, escalation correctness, checkpoint/resume success, audit completeness, failure containment, model-output containment, duplicate executions, and invalid transitions.
 
 ## CI and Deployment
 
 `.github/workflows/ci.yml` is the source-of-truth automation gate. Pushes and pull requests to `main` run the complete pytest suite. Pull requests are test-only; a push to `main` deploys to Hugging Face only after the test job succeeds.
 
 The Hugging Face sync job uses `huggingface/hub-sync@v0.1.0`, targets `FlyingNunchucks/09-agentic-workflow-sys`, and authenticates only through the GitHub repository secret `HF_DEPLOY_TOKEN`. GitHub remains the code source of truth.
+
+Runtime inference credentials are separate from deployment credentials. `HF_DEPLOY_TOKEN` is not reused as the Space's inference token.
 
 ## Project Structure
 
@@ -277,27 +277,12 @@ requirements.txt
 .gitignore
 .github/workflows/ci.yml
 src/
+  hf_provider.py
+  model_assist.py
+  ...
 tests/
 ```
 
-## Build Sequence
-
-1. Structured schemas
-2. DAG validation
-3. Allowlisted handler registry
-4. Deterministic executor
-5. Structured event logging
-6. Bounded retries
-7. Workflow persistence and resume
-8. Human escalation
-9. Deterministic conditional routing
-10. Synthetic business workflow
-11. Bounded model-assisted node
-12. System evaluation suite
-13. Gradio demo
-14. CI-gated GitHub → Hugging Face deployment
-15. Live production and public-repository hygiene checks
-
 ## Status
 
-**Current phase:** Deterministic workflow engine, fictional wealth-management household-onboarding demo, bounded AI intake-organizer interface, structured evaluation harness, business-friendly Gradio experience, GitHub Actions CI, and automated GitHub → Hugging Face deployment are implemented. Final live validation of the redesigned onboarding UI and portfolio closeout remain.
+**Current phase:** The workflow engine, fictional wealth-management onboarding case, bounded AI intake work product, provider adapter, path visualization, deterministic routing explanation, evaluation harness, persistence, human review, CI, and GitHub → Hugging Face deployment pipeline are implemented. Live inference remains explicitly disabled until the Space is given a runtime inference token and the deployment opts in. Final live validation and portfolio closeout remain.
