@@ -1,8 +1,9 @@
 """Gradio demo for Agent 9 — Agentic Workflow System.
 
-The UI presents the same runtime at two levels: a plain-English business story for
-non-technical visitors and detailed workflow evidence for engineers. Workflow-control
-logic remains in the runtime, not in Gradio callbacks.
+The UI presents a fictional wealth-management household-onboarding workflow at two
+levels: a plain-English business story for non-technical visitors and detailed
+workflow evidence for engineers. Workflow-control logic remains in the runtime,
+not in Gradio callbacks. All households and onboarding data are synthetic.
 """
 
 from __future__ import annotations
@@ -12,10 +13,7 @@ from typing import Any
 
 import gradio as gr
 
-from src.demo_workflow import (
-    build_service_request_registry,
-    build_service_request_workflow,
-)
+from src.demo_workflow import build_onboarding_registry, build_onboarding_workflow
 from src.evaluation import run_evaluation_suite
 from src.executor import (
     WorkflowExecutionError,
@@ -39,46 +37,55 @@ from src.ui_presenters import (
 )
 
 
-WORKFLOW = build_service_request_workflow()
+WORKFLOW = build_onboarding_workflow()
 DATABASE_PATH = os.getenv("WORKFLOW_DB_PATH", "workflow_runs.db")
 STATE_STORE = SQLiteStateStore(DATABASE_PATH)
 
 
 STORY_SPECS: dict[str, dict[str, Any]] = {
-    "Routine request — finishes automatically": {
-        "request_id": "REQ-STORY-ROUTINE",
-        "request_type": "ACCESS",
-        "description": "Provision standard synthetic access for a fictional demo user.",
-        "priority": "NORMAL",
-        "risk_level": "LOW",
-        "estimated_cost": 125.0,
+    "Straightforward household — package becomes ready": {
+        "household_id": "HH-STORY-STANDARD",
+        "household_type": "JOINT",
+        "onboarding_notes": (
+            "Fictional joint household seeking a standard advisory relationship. "
+            "All intake information is synthetic."
+        ),
+        "documents_complete": True,
+        "identity_status": "VERIFIED",
+        "relationship_complexity": "STANDARD",
         "simulation_mode": "NONE",
     },
-    "Temporary problem — retries once and recovers": {
-        "request_id": "REQ-STORY-RETRY",
-        "request_type": "ACCESS",
-        "description": "Provision synthetic access while simulating one temporary service interruption.",
-        "priority": "NORMAL",
-        "risk_level": "LOW",
-        "estimated_cost": 125.0,
+    "Temporary service problem — retries and recovers": {
+        "household_id": "HH-STORY-RETRY",
+        "household_type": "JOINT",
+        "onboarding_notes": (
+            "Fictional standard household used to demonstrate one temporary onboarding-service interruption."
+        ),
+        "documents_complete": True,
+        "identity_status": "VERIFIED",
+        "relationship_complexity": "STANDARD",
         "simulation_mode": "TRANSIENT_ONCE",
     },
-    "High-risk request — pauses for a person": {
-        "request_id": "REQ-STORY-HIGH-RISK",
-        "request_type": "ACCESS",
-        "description": "Provision privileged synthetic access that requires explicit human review.",
-        "priority": "HIGH",
-        "risk_level": "HIGH",
-        "estimated_cost": 1_500.0,
+    "Trust / complex household — pauses for a person": {
+        "household_id": "HH-STORY-EXCEPTION",
+        "household_type": "TRUST",
+        "onboarding_notes": (
+            "Fictional trust household with a more complex relationship structure that requires extra review."
+        ),
+        "documents_complete": True,
+        "identity_status": "VERIFIED",
+        "relationship_complexity": "COMPLEX",
         "simulation_mode": "NONE",
     },
-    "Permanent problem — stops safely": {
-        "request_id": "REQ-STORY-FAILURE",
-        "request_type": "ACCESS",
-        "description": "Provision synthetic access while simulating a permanent downstream service failure.",
-        "priority": "NORMAL",
-        "risk_level": "LOW",
-        "estimated_cost": 125.0,
+    "Permanent dependency failure — stops safely": {
+        "household_id": "HH-STORY-FAILURE",
+        "household_type": "JOINT",
+        "onboarding_notes": (
+            "Fictional standard household used to demonstrate a permanent downstream onboarding-service failure."
+        ),
+        "documents_complete": True,
+        "identity_status": "VERIFIED",
+        "relationship_complexity": "STANDARD",
         "simulation_mode": "PERMANENT",
     },
 }
@@ -121,7 +128,7 @@ APP_CSS = """
   margin-bottom: .35rem;
 }
 .agent-hero h1 { margin: .1rem 0 .45rem 0; font-size: 2rem; }
-.agent-hero p { margin: 0; max-width: 980px; font-size: 1.03rem; line-height: 1.55; }
+.agent-hero p { margin: 0; max-width: 1000px; font-size: 1.03rem; line-height: 1.55; }
 .pattern-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -136,6 +143,19 @@ APP_CSS = """
 }
 .pattern-card strong { display: block; margin-bottom: .3rem; font-size: 1rem; }
 .pattern-card span { opacity: .78; line-height: 1.45; font-size: .92rem; }
+.ai-card {
+  border-color: rgba(59,130,246,.55);
+  background: linear-gradient(135deg, rgba(59,130,246,.14), rgba(99,102,241,.09));
+}
+.ai-explainer {
+  padding: 1rem 1.1rem;
+  border-radius: 14px;
+  border: 1px solid rgba(59,130,246,.38);
+  background: rgba(59,130,246,.08);
+  margin: .7rem 0 1rem 0;
+  line-height: 1.5;
+}
+.ai-explainer strong { font-size: 1.03rem; }
 .pattern-flow {
   display: flex;
   flex-wrap: wrap;
@@ -151,6 +171,7 @@ APP_CSS = """
   font-weight: 650;
   font-size: .9rem;
 }
+.ai-pill { border-color: rgba(59,130,246,.6); background: rgba(59,130,246,.12); }
 .flow-arrow { opacity: .55; font-weight: 800; }
 .business-outcome {
   border-radius: 16px;
@@ -166,9 +187,7 @@ APP_CSS = """
 .outcome-title { font-size: 1.28rem; font-weight: 800; margin-bottom: .4rem; }
 .outcome-body { line-height: 1.5; margin-bottom: .55rem; }
 .outcome-takeaway { font-weight: 650; opacity: .83; }
-.journey-wrap {
-  padding: 1rem 0 .2rem 0;
-}
+.journey-wrap { padding: 1rem 0 .2rem 0; }
 .journey-heading { font-size: 1.15rem; font-weight: 800; }
 .journey-subheading { opacity: .72; margin: .25rem 0 .8rem 0; line-height: 1.45; }
 .journey-grid {
@@ -215,28 +234,29 @@ APP_CSS = """
 
 HERO_HTML = """
 <div class="agent-hero">
-  <div class="agent-eyebrow">AI WORKFLOW PATTERN</div>
+  <div class="agent-eyebrow">WEALTH MANAGEMENT • AI WORKFLOW PATTERN • SYNTHETIC DEMO</div>
   <h1>Agent 9 — Agentic Workflow System</h1>
-  <p><strong>Think of this as a digital operations manager.</strong> It moves a business request through approved steps, retries temporary problems, stops safely on permanent failures, and asks a person before high-risk work can continue. AI may assist inside a bounded step, but it never gets to rewrite the process or bypass a human checkpoint.</p>
+  <p><strong>Imagine a fictional wealth-management firm onboarding a new household.</strong> The workflow validates intake, lets AI organize the notes inside a tightly bounded step, checks documents and exceptions with deterministic rules, prepares and verifies an onboarding package, retries temporary operational failures, and pauses exception cases for a person. No real client, account, KYC/AML service, money movement, or trade is involved.</p>
 </div>
 """
 
 
 PATTERN_HTML = """
 <div class="pattern-grid">
-  <div class="pattern-card"><strong>⚡ Automate routine work</strong><span>Low-risk requests can finish without pulling a person into every step.</span></div>
-  <div class="pattern-card"><strong>↻ Recover from temporary problems</strong><span>Bounded retries handle transient failures without creating an endless loop.</span></div>
-  <div class="pattern-card"><strong>🧑 Human control when it matters</strong><span>High-risk work pauses until an explicit person approves or rejects it.</span></div>
-  <div class="pattern-card"><strong>🛑 Stop safely</strong><span>Permanent failures are contained so later actions do not run in an uncertain state.</span></div>
+  <div class="pattern-card ai-card"><strong>🤖 AI organizes the intake</strong><span>A bounded AI node may summarize synthetic notes and propose one approved household-profile category.</span></div>
+  <div class="pattern-card"><strong>✓ Code enforces the process</strong><span>Document status, exception rules, routing, retries, persistence, and allowed next steps remain application-controlled.</span></div>
+  <div class="pattern-card"><strong>🧑 A person handles exceptions</strong><span>Trust, entity, complex, missing-document, or identity-review cases can pause before they are marked ready.</span></div>
+  <div class="pattern-card"><strong>↻ Operations recover safely</strong><span>Temporary service problems retry within a limit; permanent failures stop before uncertain downstream work.</span></div>
 </div>
-<div class="section-note"><strong>The pattern:</strong> the model or task can help with work inside a step, but application code owns the sequence, allowed routes, retry limits, saved state, and human approval.</div>
+<div class="ai-explainer"><strong>Where is the AI?</strong><br>The <strong>AI Intake Organizer</strong> receives only the fictional household type and synthetic onboarding notes. Its output is restricted to a household-profile category and a short summary. It does <strong>not</strong> receive document-completeness flags, identity-review status, exception routing, handler names, retry limits, workflow state, or approval controls. The current public demo uses the deterministic fallback unless a live model provider is connected to this same bounded interface.</div>
+<div class="section-note"><strong>The pattern:</strong> AI helps interpret unstructured intake; deterministic software owns the business process; people retain authority over exception decisions.</div>
 <div class="pattern-flow">
-  <span class="flow-pill">Business request</span><span class="flow-arrow">→</span>
+  <span class="flow-pill">Household intake</span><span class="flow-arrow">→</span>
   <span class="flow-pill">Validate</span><span class="flow-arrow">→</span>
-  <span class="flow-pill">Do work</span><span class="flow-arrow">→</span>
-  <span class="flow-pill">Verify</span><span class="flow-arrow">→</span>
-  <span class="flow-pill">Risk check</span><span class="flow-arrow">→</span>
-  <span class="flow-pill">Auto-finish OR human approval</span>
+  <span class="flow-pill ai-pill">🤖 AI organize</span><span class="flow-arrow">→</span>
+  <span class="flow-pill">Documents + rules</span><span class="flow-arrow">→</span>
+  <span class="flow-pill">Prepare + verify package</span><span class="flow-arrow">→</span>
+  <span class="flow-pill">Standard ready OR human review</span>
 </div>
 """
 
@@ -244,9 +264,9 @@ PATTERN_HTML = """
 EMPTY_OUTCOME_HTML = """
 <div class="business-outcome outcome-neutral">
   <div class="outcome-eyebrow">READY TO DEMONSTRATE</div>
-  <div class="outcome-title">Choose one story and run it</div>
-  <div class="outcome-body">The result will be explained here in plain English. You can then open the technical tabs to see the exact node state, audit events, and structured outputs behind the story.</div>
-  <div class="outcome-takeaway">Start with “Routine request” for the simplest path.</div>
+  <div class="outcome-title">Choose a fictional household story and run it</div>
+  <div class="outcome-body">The result will be explained here in plain English. You can then open the technical tabs to see the exact state, audit events, AI-node output, retries, and human-review record behind the story.</div>
+  <div class="outcome-takeaway">Start with “Straightforward household” for the simplest onboarding path.</div>
 </div>
 """
 
@@ -254,53 +274,52 @@ EMPTY_OUTCOME_HTML = """
 EMPTY_JOURNEY_HTML = """
 <div class="journey-wrap">
   <div class="journey-heading">What happened, step by step</div>
-  <div class="journey-subheading">After you run a story, this section will translate the workflow engine into an understandable business journey.</div>
+  <div class="journey-subheading">After you run a story, this section will show where AI assisted, where deterministic rules took over, and whether a person was required.</div>
 </div>
 """
 
 
 def run_request_ui(
-    request_id: str,
-    request_type: str,
-    description: str,
-    priority: str,
-    risk_level: str,
-    estimated_cost: float,
+    household_id: str,
+    household_type: str,
+    onboarding_notes: str,
+    documents_complete: bool,
+    identity_status: str,
+    relationship_complexity: str,
     simulation_mode: str,
 ) -> AppBundle:
-    """Run one synthetic service request and return business plus technical views."""
+    """Run one synthetic onboarding case and return business plus technical views."""
 
     context = {
-        "request_id": request_id,
-        "request_type": request_type,
-        "description": description,
-        "priority": priority,
-        "risk_level": risk_level,
-        "estimated_cost": estimated_cost,
-        "supporting_info": {"source": "gradio-synthetic-demo"},
+        "household_id": household_id,
+        "household_type": household_type,
+        "onboarding_notes": onboarding_notes,
+        "documents_complete": documents_complete,
+        "identity_status": identity_status,
+        "relationship_complexity": relationship_complexity,
         "simulation_mode": simulation_mode,
     }
 
     try:
         run = execute_workflow(
             WORKFLOW,
-            build_service_request_registry(),
+            build_onboarding_registry(),
             context=context,
             state_store=STATE_STORE,
         )
         return _app_bundle(run)
     except WorkflowExecutionError as exc:
-        return _bundle_with_notice(exc.run, "The workflow stopped after a controlled failure.")
+        return _bundle_with_notice(exc.run, "The onboarding workflow stopped after a controlled failure.")
     except Exception as exc:  # UI boundary: do not surface traceback details
-        return _empty_bundle(f"Unable to start workflow: {type(exc).__name__}")
+        return _empty_bundle(f"Unable to start onboarding workflow: {type(exc).__name__}")
 
 
 def run_story_ui(story: str) -> AppBundle:
-    """Run one prebuilt public-safe story for a non-technical visitor."""
+    """Run one prebuilt public-safe onboarding story for a non-technical visitor."""
 
     spec = STORY_SPECS.get(story)
     if spec is None:
-        return _empty_bundle("Choose one of the four demo stories before running the workflow.")
+        return _empty_bundle("Choose one of the four onboarding stories before running the workflow.")
     return run_request_ui(**spec)
 
 
@@ -320,7 +339,7 @@ def refresh_run_ui(run_id: str) -> AppBundle:
 
 
 def submit_human_decision_ui(run_id: str, decision: str) -> AppBundle:
-    """Apply one explicit decision to the currently open human review."""
+    """Apply one explicit decision to the currently open onboarding review."""
 
     if not run_id or not run_id.strip():
         return _empty_bundle("Enter a run ID before submitting a human decision.")
@@ -335,7 +354,7 @@ def submit_human_decision_ui(run_id: str, decision: str) -> AppBundle:
     if len(open_reviews) != 1:
         notice = (
             "This run does not have exactly one open human review. "
-            "Refresh the run and inspect the Human Review table."
+            "Reload the run and inspect the Human Review table."
         )
         return _bundle_with_notice(run, notice)
 
@@ -343,7 +362,7 @@ def submit_human_decision_ui(run_id: str, decision: str) -> AppBundle:
     try:
         updated = submit_human_decision(
             WORKFLOW,
-            build_service_request_registry(),
+            build_onboarding_registry(),
             run_id=normalized_run_id,
             review_id=review.review_id,
             decision=HumanDecision(decision),
@@ -363,7 +382,7 @@ def run_evaluation_ui() -> tuple[str, list[list[str]], list[list[str]]]:
 
     report = run_evaluation_suite()
     summary = (
-        "### Deterministic Evaluation\n"
+        "### Wealth Onboarding Workflow Evaluation\n"
         f"**Cases:** {report.passed_cases}/{report.total_cases} passed  \n"
         f"**Pass rate:** {report.case_pass_rate:.2f}  \n"
         f"**Duplicate executions:** {report.metrics['duplicate_execution_count']}  \n"
@@ -407,21 +426,21 @@ def _empty_bundle(message: str, run_id: str = "") -> AppBundle:
 def build_app() -> gr.Blocks:
     """Construct the public Gradio application."""
 
-    with gr.Blocks(title="Agent 9 — Agentic Workflow System", css=APP_CSS) as demo:
+    with gr.Blocks(title="Agent 9 — Wealth Onboarding Workflow", css=APP_CSS) as demo:
         gr.HTML(HERO_HTML)
         gr.HTML(PATTERN_HTML)
 
-        gr.Markdown("## Try the pattern in one click")
+        gr.Markdown("## Try the onboarding pattern in one click")
         gr.Markdown(
-            "Pick the business story you want to see. The app will explain the outcome "
-            "in plain English first; the engineering evidence remains available below."
+            "Pick a fictional household story. The app explains the business outcome first; "
+            "the engineering evidence remains available in the technical tabs below."
         )
         story = gr.Radio(
             choices=list(STORY_SPECS),
-            value="Routine request — finishes automatically",
-            label="Choose a demo story",
+            value="Straightforward household — package becomes ready",
+            label="Choose an onboarding story",
         )
-        story_button = gr.Button("Run This Story", variant="primary")
+        story_button = gr.Button("Run This Onboarding Story", variant="primary")
 
         business_outcome = gr.HTML(EMPTY_OUTCOME_HTML)
         business_journey = gr.HTML(EMPTY_JOURNEY_HTML)
@@ -439,42 +458,43 @@ def build_app() -> gr.Blocks:
                 refresh_button = gr.Button("Reload Saved Run")
 
         with gr.Tabs():
-            with gr.Tab("Customize Request"):
+            with gr.Tab("Customize Household"):
                 gr.Markdown(
-                    "### Build your own synthetic scenario\n"
-                    "This is the same workflow used by the one-click stories, with the "
-                    "inputs exposed so you can deliberately exercise different paths."
+                    "### Build your own synthetic onboarding scenario\n"
+                    "These inputs are fictional and exist only to demonstrate workflow behavior."
                 )
                 with gr.Row():
-                    request_id = gr.Textbox(
-                        label="Request ID",
-                        value="REQ-DEMO-001",
+                    household_id = gr.Textbox(
+                        label="Household ID",
+                        value="HH-DEMO-001",
                     )
-                    request_type = gr.Dropdown(
-                        choices=["ACCESS", "BILLING", "GENERAL"],
-                        value="ACCESS",
-                        label="Request Type",
+                    household_type = gr.Dropdown(
+                        choices=["INDIVIDUAL", "JOINT", "TRUST", "ENTITY"],
+                        value="JOINT",
+                        label="Household Type",
                     )
-                    priority = gr.Dropdown(
-                        choices=["LOW", "NORMAL", "HIGH"],
-                        value="NORMAL",
-                        label="Priority",
+                    documents_complete = gr.Checkbox(
+                        label="Onboarding documents complete",
+                        value=True,
                     )
-                description = gr.Textbox(
-                    label="Description",
-                    value="Provision synthetic access for a fictional demo user.",
-                    lines=3,
+                onboarding_notes = gr.Textbox(
+                    label="Synthetic Onboarding Notes",
+                    value=(
+                        "Fictional household seeking a standard advisory relationship. "
+                        "All information in this demo is synthetic."
+                    ),
+                    lines=4,
                 )
                 with gr.Row():
-                    risk_level = gr.Dropdown(
-                        choices=["LOW", "HIGH"],
-                        value="LOW",
-                        label="Risk Level",
+                    identity_status = gr.Dropdown(
+                        choices=["VERIFIED", "REVIEW_REQUIRED"],
+                        value="VERIFIED",
+                        label="Identity Check Status",
                     )
-                    estimated_cost = gr.Number(
-                        label="Estimated Cost",
-                        value=125.0,
-                        minimum=0,
+                    relationship_complexity = gr.Dropdown(
+                        choices=["STANDARD", "COMPLEX"],
+                        value="STANDARD",
+                        label="Relationship Complexity",
                     )
                     simulation_mode = gr.Dropdown(
                         choices=["NONE", "TRANSIENT_ONCE", "PERMANENT"],
@@ -482,18 +502,19 @@ def build_app() -> gr.Blocks:
                         label="Failure Simulation",
                     )
                 gr.Markdown(
-                    "**Helpful shortcuts:** HIGH risk or cost ≥ 1000 demonstrates human "
-                    "escalation. TRANSIENT_ONCE demonstrates bounded retry recovery."
+                    "**Helpful shortcuts:** TRUST/ENTITY, COMPLEX, missing documents, or "
+                    "REVIEW_REQUIRED demonstrates the human-review path. TRANSIENT_ONCE "
+                    "demonstrates bounded retry recovery."
                 )
-                run_button = gr.Button("Run Custom Request", variant="primary")
+                run_button = gr.Button("Run Custom Household", variant="primary")
 
             with gr.Tab("Technical Details"):
                 gr.Markdown(
                     "### Engineering view\n"
-                    "This is the evidence behind the plain-English story: exact workflow "
-                    "status, node state, attempt counts, errors, and structured outputs."
+                    "Inspect exact workflow status, node state, attempt counts, errors, and "
+                    "structured outputs—including the AI Intake Organizer output and its source."
                 )
-                status = gr.Markdown("### Workflow Status\nRun a synthetic request to begin.")
+                status = gr.Markdown("### Workflow Status\nRun a synthetic household to begin.")
                 node_table = gr.Dataframe(
                     headers=NODE_HEADERS,
                     interactive=False,
@@ -505,7 +526,7 @@ def build_app() -> gr.Blocks:
                 gr.Markdown(
                     "### Why the workflow is auditable\n"
                     "Every meaningful control transition is recorded. The audit timeline "
-                    "contains control metadata only; workflow context is not copied into event details."
+                    "contains control metadata only; onboarding context is not copied into event details."
                 )
                 event_table = gr.Dataframe(
                     headers=EVENT_HEADERS,
@@ -513,11 +534,11 @@ def build_app() -> gr.Blocks:
                     label="Append-Only Workflow Events",
                 )
 
-            with gr.Tab("Human Decision"):
+            with gr.Tab("Operations / Compliance Review"):
                 gr.Markdown(
                     "### The human remains in control\n"
-                    "A high-risk run pauses here. The workflow cannot continue until a "
-                    "person explicitly decides what should happen."
+                    "A fictional exception case pauses here. The workflow cannot mark the "
+                    "package ready until a person explicitly decides what should happen."
                 )
                 review_table = gr.Dataframe(
                     headers=REVIEW_HEADERS,
@@ -532,16 +553,17 @@ def build_app() -> gr.Blocks:
                     )
                     decision_button = gr.Button("Submit Human Decision", variant="primary")
                 gr.Markdown(
-                    "**APPROVE** continues the approved high-risk path. **REJECT** ends the "
-                    "business process as `REJECTED`, not `FAILED`. **RETRY** opens a fresh "
-                    "review without replaying completed upstream work."
+                    "**APPROVE** continues the approved exception path. **REJECT** ends the "
+                    "fictional business process as `REJECTED`, not `FAILED`. **RETRY** opens "
+                    "a fresh review without replaying completed upstream work. This is an "
+                    "illustrative workflow, not any firm's actual regulatory procedure."
                 )
 
             with gr.Tab("Evaluation"):
                 gr.Markdown(
                     "### Reliability evidence\n"
-                    "The same engine is exercised across success, retry, escalation, recovery, "
-                    "failure, persistence, and adversarial-control scenarios."
+                    "The same onboarding engine is exercised across success, retry, human "
+                    "review, persistence, failure, and adversarial-control scenarios."
                 )
                 evaluation_summary = gr.Markdown(
                     "Run the deterministic evaluation harness to inspect system-level metrics."
@@ -577,12 +599,12 @@ def build_app() -> gr.Blocks:
         run_button.click(
             fn=run_request_ui,
             inputs=[
-                request_id,
-                request_type,
-                description,
-                priority,
-                risk_level,
-                estimated_cost,
+                household_id,
+                household_type,
+                onboarding_notes,
+                documents_complete,
+                identity_status,
+                relationship_complexity,
                 simulation_mode,
             ],
             outputs=run_outputs,
