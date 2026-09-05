@@ -16,7 +16,7 @@ The workflow engine—not the language model—decides what may run next.
 
 ## Demo Scenario
 
-The public demo will use a synthetic fictional **Service Request Workflow**.
+The public demo uses a synthetic fictional **Service Request Workflow**.
 
 A request moves through a controlled process:
 
@@ -46,52 +46,53 @@ The scenario is intentionally synthetic and contains no private, client, financi
 
 ## Architecture
 
-The minimum system will contain the following layers.
+The system contains the following layers.
 
 ### 1. Structured Workflow Definition
 
-Typed schemas will define workflow nodes, dependencies, retry policies, workflow runs, node runs, events, and human-review decisions.
+Typed schemas define workflow nodes, dependencies, retry policies, workflow runs, node runs, events, and human-review decisions.
 
 A workflow definition describes what **may** happen. A workflow run records what **did** happen.
 
 ### 2. DAG Validation
 
-Before execution, deterministic validation will reject invalid workflow definitions such as:
+Before execution, deterministic validation rejects invalid workflow definitions such as:
 
 - duplicate node identifiers,
 - unknown dependencies,
 - cyclic dependencies,
-- unsupported node types,
+- invalid decision routes,
+- unsupported branch reconvergence,
 - invalid retry policies,
 - and malformed workflow definitions.
 
-Invalid workflows must fail before any task executes.
+Invalid workflows fail before any task executes.
 
 ### 3. Handler Registry
 
-Workflow task handlers will be explicitly registered and allowlisted. A workflow cannot invoke an arbitrary model-generated function name.
+Workflow task handlers are explicitly registered and allowlisted. A workflow cannot invoke an arbitrary model-generated function name.
 
 ### 4. Workflow Executor
 
-The executor will determine which nodes are ready, blocked, completed, failed, retryable, awaiting human review, or terminal.
+The executor determines which nodes are ready, completed, skipped, failed, retryable, awaiting human review, or terminal.
 
-The MVP will use sequential synchronous execution so the workflow semantics remain easy to inspect and test.
+The MVP uses sequential synchronous execution so the workflow semantics remain easy to inspect and test.
 
 ### 5. Workflow State Store
 
-The project will begin with an in-memory state store for deterministic tests and then add SQLite persistence to demonstrate checkpoint, reload, and resume behavior.
+An in-memory state store supports deterministic tests, while SQLite persistence demonstrates checkpoint, reload, and resume behavior.
 
 ### 6. Retry Controller
 
-Retries will be explicit, bounded, and policy-controlled.
+Retries are explicit, bounded, and policy-controlled.
 
-The runtime will distinguish retryable failures from permanent failures and will never permit unlimited retry loops.
+The runtime distinguishes explicitly retryable failures from permanent failures and never permits unlimited retry loops.
 
 ### 7. Human Escalation
 
 The workflow may enter a `WAITING_FOR_HUMAN` state. Execution cannot continue until a valid structured decision is recorded.
 
-Initial human decisions:
+Human decisions:
 
 - `APPROVE`
 - `REJECT`
@@ -99,14 +100,16 @@ Initial human decisions:
 
 ### 8. Event and Audit Log
 
-Meaningful state transitions will emit structured events so execution can be inspected and reconstructed.
+Meaningful state transitions emit structured events so execution can be inspected and reconstructed.
 
 Examples include:
 
 - workflow started,
 - node started,
 - node completed,
+- node skipped,
 - node failed,
+- decision routed,
 - retry scheduled,
 - human review requested,
 - human approved or rejected,
@@ -116,7 +119,7 @@ Examples include:
 
 ## Workflow States
 
-Initial application-controlled states:
+Application-controlled workflow states:
 
 ```text
 PENDING
@@ -132,7 +135,7 @@ The model cannot invent or directly set arbitrary workflow states.
 
 ## Node Types
 
-The MVP begins with a deliberately small node vocabulary:
+The MVP uses a deliberately small node vocabulary:
 
 ```text
 TASK
@@ -145,7 +148,7 @@ Additional node types should be introduced only when a demonstrated requirement 
 
 ## Reliability Requirements
 
-The MVP should demonstrate that:
+The MVP demonstrates that:
 
 1. A normal workflow executes in dependency order and completes.
 2. A transient failure retries within a bounded policy and can recover.
@@ -158,30 +161,38 @@ The sixth requirement introduces **idempotency**, a core reliability property fo
 
 ## Model Boundary
 
-A later version may include a model-assisted classification or summarization node.
+The service-request classifier now supports an optional **bounded model-assisted mode**.
 
-The control boundary remains:
+The model receives only the request type and description needed for classification. It returns strict JSON containing a classification from an application-defined allowlist plus a short rationale. Pydantic validates that proposal before the workflow accepts it.
 
 ```text
-model proposes
-      ↓
-schema validates
-      ↓
-application decides transition
+model proposes classification
+          ↓
+strict JSON schema validates
+          ↓
+application accepts normalized data
+          ↓
+deterministic workflow continues
 ```
 
-The model will not be permitted to:
+The deterministic classifier remains the default, and model integration is provider-agnostic through an injected callable. A live inference-provider adapter will be added separately so provider networking does not become part of workflow control logic.
+
+The model is not permitted to:
 
 - change the DAG,
+- choose arbitrary route targets,
 - register arbitrary handlers,
 - bypass approval gates,
 - change retry limits,
 - execute arbitrary code,
-- or directly publish an invalid workflow result.
+- set workflow state,
+- or publish unvalidated structured output.
+
+Malformed model output, invented classifications, extra control fields, and provider failures are contained at the classification node. Rejected model text is not copied into audit-event details.
 
 ## Evaluation Focus
 
-Evaluation will emphasize workflow correctness rather than prose quality.
+Evaluation emphasizes workflow correctness rather than prose quality.
 
 Planned metrics include:
 
@@ -193,9 +204,10 @@ Planned metrics include:
 - checkpoint/resume success,
 - duplicate-execution count,
 - audit-log completeness,
+- model-output containment,
 - and failure-containment rate.
 
-Planned tests will cover success paths, malformed workflow definitions, retry exhaustion, permanent failures, invalid structured outputs, human escalation, duplicate events, persistence/recovery, and adversarial attempts to bypass workflow controls.
+Planned tests cover success paths, malformed workflow definitions, retry exhaustion, permanent failures, invalid structured outputs, human escalation, duplicate events, persistence/recovery, and adversarial attempts to bypass workflow controls.
 
 ## Initial Project Structure
 
@@ -208,7 +220,7 @@ src/
 tests/
 ```
 
-Implementation will be added incrementally in small, testable changes.
+Implementation is being added incrementally in small, testable changes.
 
 ## Planned Build Sequence
 
@@ -230,4 +242,4 @@ Implementation will be added incrementally in small, testable changes.
 
 ## Status
 
-**Current phase:** Deterministic workflow engine and synthetic service-request workflow implemented; model-assisted behavior, full evaluation, UI, and deployment remain.
+**Current phase:** Deterministic workflow engine, synthetic service-request workflow, and bounded provider-agnostic model-assisted classification are implemented. Full evaluation, live provider integration, UI, and deployment remain.
