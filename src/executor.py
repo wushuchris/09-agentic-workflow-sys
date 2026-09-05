@@ -1,13 +1,14 @@
 """Deterministic sequential workflow executor with durable checkpoints.
 
 The executor validates the DAG, resolves only allowlisted handlers, emits structured
-audit events, enforces bounded retries, resumes safe checkpoints, and pauses durably
-at HUMAN_GATE nodes until an explicit human decision is submitted. Branching
-semantics and live model calls are added in later layers.
+audit events, enforces bounded retries, executes bounded DECISION routes, resumes
+safe checkpoints, and pauses durably at HUMAN_GATE nodes until an explicit human
+decision is submitted. Live model calls are added in a later layer.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
@@ -185,7 +186,7 @@ def submit_human_decision(
     now = utc_now()
 
     if normalized_decision is HumanDecision.RETRY:
-        retry_review = create_review(
+        create_review(
             run,
             node_id=node.node_id,
             reason=decided_review.reason,
@@ -266,8 +267,23 @@ def _run_remaining_nodes(
 ) -> WorkflowRun:
     for node_id in order:
         node_run = run.node_runs[node_id]
-        if node_run.status is NodeStatus.COMPLETED:
+        if node_run.status in {NodeStatus.COMPLETED, NodeStatus.SKIPPED}:
             continue
+
+        skipped_dependencies = [
+            dependency_id
+            for dependency_id in node_by_id[node_id].depends_on
+            if run.node_runs[dependency_id].status is NodeStatus.SKIPPED
+        ]
+        if skipped_dependencies:
+            _mark_node_skipped(
+                run,
+                node_run,
+                details={"skipped_dependencies": sorted(skipped_dependencies)},
+                state_store=state_store,
+            )
+            continue
+
         if node_run.status not in {
             NodeStatus.PENDING,
             NodeStatus.READY,
@@ -281,6 +297,9 @@ def _run_remaining_nodes(
         node = node_by_id[node_id]
         if node.node_type is NodeType.TASK:
             _execute_task_node(node, run, registry, state_store)
+            continue
+        if node.node_type is NodeType.DECISION:
+            _execute_decision_node(node, run, registry, state_store)
             continue
         if node.node_type is NodeType.HUMAN_GATE:
             return _pause_for_human_review(node, run, state_store)
@@ -352,13 +371,85 @@ def _execute_task_node(
     registry: HandlerRegistry,
     state_store: StateStore | None,
 ) -> None:
+    _execute_handler_node(node, run, registry, state_store)
+
+
+def _execute_decision_node(
+    node: NodeDefinition,
+    run: WorkflowRun,
+    registry: HandlerRegistry,
+    state_store: StateStore | None,
+) -> None:
+    def validate_route(output: dict[str, Any]) -> str:
+        route = output.get("route")
+        if not isinstance(route, str) or not route.strip():
+            raise ValueError(
+                f"DECISION node '{node.node_id}' must return a non-blank string route"
+            )
+        if route not in node.routes:
+            allowed = ", ".join(sorted(node.routes))
+            raise ValueError(
+                f"DECISION node '{node.node_id}' returned unknown route '{route}'; "
+                f"allowed routes: {allowed}"
+            )
+        return route
+
+    _, route = _execute_handler_node(
+        node,
+        run,
+        registry,
+        state_store,
+        output_validator=validate_route,
+    )
+    selected_target = node.routes[route]
+    record_event(
+        run,
+        EventType.DECISION_ROUTED,
+        node_id=node.node_id,
+        details={"route": route, "selected_target": selected_target},
+    )
+
+    for route_label, target_node_id in sorted(node.routes.items()):
+        if target_node_id == selected_target:
+            continue
+        target_run = run.node_runs[target_node_id]
+        if target_run.status in {NodeStatus.COMPLETED, NodeStatus.RUNNING}:
+            _mark_preexecution_failure(
+                run,
+                target_run,
+                f"unselected route target '{target_node_id}' has already started",
+                state_store,
+            )
+        if target_run.status is not NodeStatus.SKIPPED:
+            _mark_node_skipped(
+                run,
+                target_run,
+                details={
+                    "decision_node": node.node_id,
+                    "unselected_route": route_label,
+                    "selected_route": route,
+                },
+                state_store=state_store,
+            )
+
+    _checkpoint(state_store, run)
+
+
+def _execute_handler_node(
+    node: NodeDefinition,
+    run: WorkflowRun,
+    registry: HandlerRegistry,
+    state_store: StateStore | None,
+    *,
+    output_validator: Callable[[dict[str, Any]], Any] | None = None,
+) -> tuple[dict[str, Any], Any]:
     node_run = run.node_runs[node.node_id]
 
     if node.handler is None:
         _mark_preexecution_failure(
             run,
             node_run,
-            f"TASK node '{node.node_id}' must declare a handler",
+            f"{node.node_type.value} node '{node.node_id}' must declare a handler",
             state_store,
         )
 
@@ -394,6 +485,9 @@ def _execute_task_node(
             output = handler(payload)
             if not isinstance(output, dict):
                 raise TypeError("handler output must be a dictionary")
+            validated_output = (
+                output_validator(output) if output_validator is not None else None
+            )
         except Exception as exc:
             retry = should_retry(
                 node.retry_policy,
@@ -456,7 +550,28 @@ def _execute_task_node(
             details={"attempt": node_run.attempt},
         )
         _checkpoint(state_store, run)
-        return
+        return output, validated_output
+
+
+def _mark_node_skipped(
+    run: WorkflowRun,
+    node_run: NodeRun,
+    *,
+    details: dict[str, Any],
+    state_store: StateStore | None,
+) -> None:
+    node_run.status = NodeStatus.SKIPPED
+    node_run.output = None
+    node_run.error = None
+    node_run.completed_at = utc_now()
+    run.updated_at = node_run.completed_at
+    record_event(
+        run,
+        EventType.NODE_SKIPPED,
+        node_id=node_run.node_id,
+        details=details,
+    )
+    _checkpoint(state_store, run)
 
 
 def _mark_preexecution_failure(
@@ -539,6 +654,7 @@ def _validate_resume_checkpoint(
         NodeStatus.READY,
         NodeStatus.RETRY_SCHEDULED,
         NodeStatus.COMPLETED,
+        NodeStatus.SKIPPED,
     }
     for node in definition.nodes:
         node_status = run.node_runs[node.node_id].status
@@ -624,7 +740,10 @@ def _build_final_output(
             dependents[dependency_id] += 1
 
     terminal_node_ids = sorted(
-        node_id for node_id, dependent_count in dependents.items() if dependent_count == 0
+        node_id
+        for node_id, dependent_count in dependents.items()
+        if dependent_count == 0
+        and run.node_runs[node_id].status is NodeStatus.COMPLETED
     )
 
     return {
