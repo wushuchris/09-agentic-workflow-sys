@@ -1,14 +1,16 @@
-"""Public-safe deterministic demo workflow for Agent 9.
+"""Public-safe service-request demo workflow for Agent 9.
 
 The Controlled Service Request Workflow exercises the workflow runtime end to end
-without using an LLM or external systems. All inputs and outputs are synthetic and
-handlers perform simulated actions only.
+with deterministic simulated actions. Classification is deterministic by default
+and can optionally be replaced by a bounded model-assisted classifier. All demo
+inputs and outputs are synthetic.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from src.model_assist import ModelCall, classify_with_model
 from src.registry import HandlerRegistry
 from src.retry import RetryableHandlerError
 from src.schemas import NodeDefinition, NodeType, RetryPolicy, WorkflowDefinition
@@ -23,7 +25,7 @@ HUMAN_REVIEW_COST = 1_000.0
 
 
 def build_service_request_workflow() -> WorkflowDefinition:
-    """Return the fixed deterministic workflow used by the public demo."""
+    """Return the fixed workflow used by the public demo."""
 
     return WorkflowDefinition(
         workflow_id="controlled-service-request",
@@ -103,8 +105,15 @@ def build_service_request_workflow() -> WorkflowDefinition:
     )
 
 
-def build_service_request_registry() -> HandlerRegistry:
-    """Return allowlisted deterministic handlers for the synthetic demo.
+def build_service_request_registry(
+    *,
+    classification_model: ModelCall | None = None,
+) -> HandlerRegistry:
+    """Return allowlisted handlers for the synthetic demo.
+
+    When classification_model is omitted, classification remains deterministic.
+    When supplied, only the classification handler delegates to the bounded model
+    adapter; all workflow control and all other handlers remain deterministic.
 
     The simulated automated-task handler keeps per-request attempt counters only so
     the TRANSIENT_ONCE demo mode can deterministically fail once and then recover.
@@ -170,6 +179,18 @@ def build_service_request_registry() -> HandlerRegistry:
 
     def classify_request(payload: dict[str, Any]) -> dict[str, Any]:
         validated = payload["dependencies"]["validate_request"]
+
+        if classification_model is not None:
+            proposal = classify_with_model(
+                classification_model,
+                request_type=validated["request_type"],
+                description=validated["description"],
+            )
+            return {
+                **proposal,
+                "priority": validated["priority"],
+            }
+
         classification_by_type = {
             "ACCESS": "ACCESS_REQUEST",
             "BILLING": "BILLING_REQUEST",
@@ -178,6 +199,7 @@ def build_service_request_registry() -> HandlerRegistry:
         return {
             "classification": classification_by_type[validated["request_type"]],
             "priority": validated["priority"],
+            "source": "DETERMINISTIC",
         }
 
     def policy_check(payload: dict[str, Any]) -> dict[str, Any]:
