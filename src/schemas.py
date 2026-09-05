@@ -136,6 +136,7 @@ class WorkflowRun(StrictModel):
 
     run_id: str = Field(min_length=1, max_length=100)
     workflow_id: str = Field(min_length=1, max_length=100)
+    workflow_version: str = Field(default="1.0", min_length=1, max_length=50)
     status: WorkflowStatus = WorkflowStatus.PENDING
     node_runs: dict[str, NodeRun] = Field(default_factory=dict)
     context: dict[str, Any] = Field(default_factory=dict)
