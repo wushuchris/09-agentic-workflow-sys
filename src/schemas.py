@@ -131,23 +131,8 @@ class WorkflowEvent(StrictModel):
     timestamp: datetime = Field(default_factory=utc_now)
 
 
-class WorkflowRun(StrictModel):
-    """Durable runtime state and append-only audit history for one workflow run."""
-
-    run_id: str = Field(min_length=1, max_length=100)
-    workflow_id: str = Field(min_length=1, max_length=100)
-    workflow_version: str = Field(default="1.0", min_length=1, max_length=50)
-    status: WorkflowStatus = WorkflowStatus.PENDING
-    node_runs: dict[str, NodeRun] = Field(default_factory=dict)
-    context: dict[str, Any] = Field(default_factory=dict)
-    events: tuple[WorkflowEvent, ...] = Field(default_factory=tuple)
-    final_output: dict[str, Any] | None = None
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
-
-
 class HumanReviewRequest(StrictModel):
-    """Structured checkpoint requiring an explicit human decision."""
+    """Durable checkpoint requiring an explicit human decision."""
 
     review_id: str = Field(min_length=1, max_length=100)
     run_id: str = Field(min_length=1, max_length=100)
@@ -156,3 +141,19 @@ class HumanReviewRequest(StrictModel):
     decision: HumanDecision | None = None
     requested_at: datetime = Field(default_factory=utc_now)
     decided_at: datetime | None = None
+
+
+class WorkflowRun(StrictModel):
+    """Durable runtime state, audit history, and human-review history for one run."""
+
+    run_id: str = Field(min_length=1, max_length=100)
+    workflow_id: str = Field(min_length=1, max_length=100)
+    workflow_version: str = Field(default="1.0", min_length=1, max_length=50)
+    status: WorkflowStatus = WorkflowStatus.PENDING
+    node_runs: dict[str, NodeRun] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
+    events: tuple[WorkflowEvent, ...] = Field(default_factory=tuple)
+    human_reviews: tuple[HumanReviewRequest, ...] = Field(default_factory=tuple)
+    final_output: dict[str, Any] | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
