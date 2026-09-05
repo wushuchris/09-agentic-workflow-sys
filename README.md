@@ -230,4 +230,4 @@ Implementation will be added incrementally in small, testable changes.
 
 ## Status
 
-**Current phase:** Architecture defined; implementation not yet started.
+**Current phase:** Deterministic workflow engine and synthetic service-request workflow implemented; model-assisted behavior, full evaluation, UI, and deployment remain.
