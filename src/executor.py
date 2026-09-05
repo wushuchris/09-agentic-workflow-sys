@@ -25,7 +25,11 @@ from src.validator import topological_order
 
 
 class WorkflowExecutionError(RuntimeError):
-    """Raised when deterministic workflow execution cannot continue safely."""
+    """Raised when execution fails while preserving the failed workflow state."""
+
+    def __init__(self, message: str, run: WorkflowRun) -> None:
+        super().__init__(message)
+        self.run = run
 
 
 def execute_workflow(
@@ -37,10 +41,10 @@ def execute_workflow(
 ) -> WorkflowRun:
     """Execute a validated TASK-only workflow sequentially.
 
-    Each handler receives a structured payload containing the immutable node
-    configuration, shared workflow context, and outputs from declared dependencies.
-    The handler must return a dictionary. Any failure marks the current node and
-    workflow as FAILED and raises WorkflowExecutionError.
+    Each handler receives a structured payload containing the node configuration,
+    shared workflow context, and outputs from declared dependencies. The handler
+    must return a dictionary. Any execution failure marks the workflow FAILED and
+    raises WorkflowExecutionError carrying the failed WorkflowRun for inspection.
     """
 
     order = topological_order(definition)
@@ -72,22 +76,23 @@ def _execute_task_node(
     run: WorkflowRun,
     registry: HandlerRegistry,
 ) -> None:
+    node_run = run.node_runs[node.node_id]
+
     if node.node_type is not NodeType.TASK:
-        run.status = WorkflowStatus.FAILED
-        run.updated_at = utc_now()
-        raise WorkflowExecutionError(
+        _mark_preexecution_failure(
+            run,
+            node_run,
             f"node '{node.node_id}' uses unsupported node type '{node.node_type.value}' "
-            "in the basic executor"
+            "in the basic executor",
         )
 
     if node.handler is None:
-        run.status = WorkflowStatus.FAILED
-        run.updated_at = utc_now()
-        raise WorkflowExecutionError(
-            f"TASK node '{node.node_id}' must declare a handler"
+        _mark_preexecution_failure(
+            run,
+            node_run,
+            f"TASK node '{node.node_id}' must declare a handler",
         )
 
-    node_run = run.node_runs[node.node_id]
     node_run.status = NodeStatus.RUNNING
     node_run.attempt = 1
     node_run.started_at = utc_now()
@@ -116,13 +121,27 @@ def _execute_task_node(
         run.status = WorkflowStatus.FAILED
         run.updated_at = node_run.completed_at
         raise WorkflowExecutionError(
-            f"node '{node.node_id}' failed: {exc}"
+            f"node '{node.node_id}' failed: {exc}",
+            run,
         ) from exc
 
     node_run.output = output
     node_run.status = NodeStatus.COMPLETED
     node_run.completed_at = utc_now()
     run.updated_at = node_run.completed_at
+
+
+def _mark_preexecution_failure(
+    run: WorkflowRun,
+    node_run: NodeRun,
+    message: str,
+) -> None:
+    node_run.status = NodeStatus.FAILED
+    node_run.error = message
+    node_run.completed_at = utc_now()
+    run.status = WorkflowStatus.FAILED
+    run.updated_at = node_run.completed_at
+    raise WorkflowExecutionError(message, run)
 
 
 def _build_final_output(
