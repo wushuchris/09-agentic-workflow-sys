@@ -1,8 +1,9 @@
 """Basic deterministic workflow executor for TASK-only MVP execution.
 
 This executor intentionally supports only sequential TASK-node execution. Retry
-handling, persistence, human gates, event logging, branching semantics, and live
-model calls are added in later layers.
+handling, persistence, human gates, branching semantics, and live model calls are
+added in later layers. Structured audit events are emitted for every meaningful
+state transition.
 """
 
 from __future__ import annotations
@@ -10,8 +11,10 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
+from src.events import record_event
 from src.registry import HandlerRegistry
 from src.schemas import (
+    EventType,
     NodeDefinition,
     NodeRun,
     NodeStatus,
@@ -45,6 +48,9 @@ def execute_workflow(
     shared workflow context, and outputs from declared dependencies. The handler
     must return a dictionary. Any execution failure marks the workflow FAILED and
     raises WorkflowExecutionError carrying the failed WorkflowRun for inspection.
+
+    Audit events intentionally contain control metadata rather than full context or
+    handler outputs, reducing the chance that the audit trail becomes a data leak.
     """
 
     order = topological_order(definition)
@@ -60,6 +66,11 @@ def execute_workflow(
         },
         context=dict(context or {}),
     )
+    record_event(
+        run,
+        EventType.WORKFLOW_STARTED,
+        details={"workflow_id": definition.workflow_id, "version": definition.version},
+    )
 
     for node_id in order:
         node = node_by_id[node_id]
@@ -68,6 +79,11 @@ def execute_workflow(
     run.status = WorkflowStatus.COMPLETED
     run.updated_at = utc_now()
     run.final_output = _build_final_output(definition, run)
+    record_event(
+        run,
+        EventType.WORKFLOW_COMPLETED,
+        details={"terminal_nodes": sorted(run.final_output)},
+    )
     return run
 
 
@@ -97,6 +113,12 @@ def _execute_task_node(
     node_run.attempt = 1
     node_run.started_at = utc_now()
     run.updated_at = node_run.started_at
+    record_event(
+        run,
+        EventType.NODE_STARTED,
+        node_id=node.node_id,
+        details={"handler": node.handler, "attempt": node_run.attempt},
+    )
 
     dependency_outputs = {
         dependency_id: run.node_runs[dependency_id].output
@@ -120,6 +142,17 @@ def _execute_task_node(
         node_run.completed_at = utc_now()
         run.status = WorkflowStatus.FAILED
         run.updated_at = node_run.completed_at
+        record_event(
+            run,
+            EventType.NODE_FAILED,
+            node_id=node.node_id,
+            details={"attempt": node_run.attempt, "error": str(exc)},
+        )
+        record_event(
+            run,
+            EventType.WORKFLOW_FAILED,
+            details={"failed_node": node.node_id},
+        )
         raise WorkflowExecutionError(
             f"node '{node.node_id}' failed: {exc}",
             run,
@@ -129,6 +162,12 @@ def _execute_task_node(
     node_run.status = NodeStatus.COMPLETED
     node_run.completed_at = utc_now()
     run.updated_at = node_run.completed_at
+    record_event(
+        run,
+        EventType.NODE_COMPLETED,
+        node_id=node.node_id,
+        details={"attempt": node_run.attempt},
+    )
 
 
 def _mark_preexecution_failure(
@@ -141,6 +180,17 @@ def _mark_preexecution_failure(
     node_run.completed_at = utc_now()
     run.status = WorkflowStatus.FAILED
     run.updated_at = node_run.completed_at
+    record_event(
+        run,
+        EventType.NODE_FAILED,
+        node_id=node_run.node_id,
+        details={"attempt": node_run.attempt, "error": message},
+    )
+    record_event(
+        run,
+        EventType.WORKFLOW_FAILED,
+        details={"failed_node": node_run.node_id},
+    )
     raise WorkflowExecutionError(message, run)
 
 
