@@ -2,7 +2,7 @@
 
 The schema layer validates the shape of workflow definitions. This module validates
 relationships between nodes: unique identifiers, dependency references, decision
-route targets, self-dependencies, and acyclicity.
+route targets, branch separation, self-dependencies, and acyclicity.
 """
 
 from __future__ import annotations
@@ -72,6 +72,10 @@ def _validate_dependencies(definition: WorkflowDefinition) -> None:
 
 def _validate_decision_routes(definition: WorkflowDefinition) -> None:
     node_by_id = {node.node_id: node for node in definition.nodes}
+    dependents: dict[str, set[str]] = {node.node_id: set() for node in definition.nodes}
+    for node in definition.nodes:
+        for dependency_id in node.depends_on:
+            dependents[dependency_id].add(node.node_id)
 
     for decision in definition.nodes:
         if decision.node_type is not NodeType.DECISION:
@@ -95,11 +99,7 @@ def _validate_decision_routes(definition: WorkflowDefinition) -> None:
                     f"DECISION node '{decision.node_id}'"
                 )
 
-        direct_dependents = {
-            node.node_id
-            for node in definition.nodes
-            if decision.node_id in node.depends_on
-        }
+        direct_dependents = dependents[decision.node_id]
         if direct_dependents != route_targets:
             unrouted = sorted(direct_dependents - route_targets)
             extra = sorted(route_targets - direct_dependents)
@@ -113,6 +113,33 @@ def _validate_decision_routes(definition: WorkflowDefinition) -> None:
                 f"DECISION node '{decision.node_id}' must route all direct dependents"
                 + (f" ({detail_text})" if detail_text else "")
             )
+
+        branch_reach: dict[str, set[str]] = {}
+        for target_node_id in sorted(route_targets):
+            reachable = _reachable_nodes(target_node_id, dependents)
+            for other_target, other_reachable in branch_reach.items():
+                overlap = sorted(reachable & other_reachable)
+                if overlap:
+                    raise WorkflowValidationError(
+                        f"DECISION node '{decision.node_id}' branch reconvergence is "
+                        f"not supported; routes through '{other_target}' and "
+                        f"'{target_node_id}' both reach: {', '.join(overlap)}"
+                    )
+            branch_reach[target_node_id] = reachable
+
+
+def _reachable_nodes(start_node_id: str, dependents: dict[str, set[str]]) -> set[str]:
+    reachable: set[str] = set()
+    stack = [start_node_id]
+
+    while stack:
+        node_id = stack.pop()
+        if node_id in reachable:
+            continue
+        reachable.add(node_id)
+        stack.extend(sorted(dependents[node_id], reverse=True))
+
+    return reachable
 
 
 def _topological_order(definition: WorkflowDefinition) -> list[str]:
