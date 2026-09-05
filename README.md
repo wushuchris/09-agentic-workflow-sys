@@ -16,7 +16,7 @@ license: mit
 
 **Hugging Face Space:** https://huggingface.co/spaces/FlyingNunchucks/09-agentic-workflow-sys
 
-A deterministic, resumable, and auditable workflow runtime for AI-assisted business processes.
+**Think of this as an operations workflow dashboard for a fictional wealth-management firm.** It demonstrates how AI can contribute useful work product inside a deterministic, resumable, and auditable business process while application code controls execution and people retain authority over consequential exceptions.
 
 ## Problem
 
@@ -32,7 +32,7 @@ The workflow engine—not the language model—decides what may run next.
 
 ## Demo Scenario — Fictional Wealth Management Household Onboarding
 
-The public demo follows a fully synthetic household through a hypothetical wealth-management onboarding process. It illustrates workflow engineering; it does not represent any firm's actual compliance procedure and does not open a real account.
+The public demo presents the workflow as an **operations workflow dashboard** for a fictional wealth-management business. A fully synthetic household moves through a hypothetical onboarding process while the dashboard makes AI assistance, deterministic controls, exception routing, retries, and human review visible. It illustrates workflow engineering; it does not represent any firm's actual compliance procedure and does not open a real account.
 
 ```text
 Synthetic household intake
@@ -143,7 +143,7 @@ The live provider output still passes through the same strict Pydantic boundary.
 
 ## What the Business-Friendly UI Shows
 
-The landing experience is designed for both non-technical and technical visitors.
+The landing experience is designed for both non-technical and technical visitors. The top-level framing is deliberately that of an **operations workflow dashboard**: the visitor can see what the business process is doing, where AI contributed, why a case took a particular path, where recovery occurred, and when a person must intervene.
 
 After each run it shows, in this order:
 
