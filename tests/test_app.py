@@ -20,6 +20,38 @@ def test_gradio_app_builds_as_blocks() -> None:
     assert isinstance(app.demo, gr.Blocks)
 
 
+def test_one_click_routine_story_explains_automatic_completion(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "routine-story.db")
+    monkeypatch.setattr(app, "STATE_STORE", store)
+
+    bundle = app.run_story_ui("Routine request — finishes automatically")
+    run = store.load(bundle[1])
+
+    assert run.status is WorkflowStatus.COMPLETED
+    assert "Completed automatically" in bundle[6]
+    assert "What happened, step by step" in bundle[7]
+    assert "Finish automatically" in bundle[7]
+
+
+def test_one_click_retry_story_explains_automatic_recovery(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "retry-story.db")
+    monkeypatch.setattr(app, "STATE_STORE", store)
+
+    bundle = app.run_story_ui("Temporary problem — retries once and recovers")
+    run = store.load(bundle[1])
+
+    assert run.status is WorkflowStatus.COMPLETED
+    assert run.node_runs["perform_automated_task"].attempt == 2
+    assert "temporary problem" in bundle[6].lower()
+    assert "Recovered on attempt 2" in bundle[7]
+
+
 def test_run_and_refresh_callbacks_use_persisted_sqlite_state(
     tmp_path: Path,
     monkeypatch,
@@ -46,6 +78,8 @@ def test_run_and_refresh_callbacks_use_persisted_sqlite_state(
     assert refreshed[1] == run_id
     assert refreshed[2] == bundle[2]
     assert refreshed[3] == bundle[3]
+    assert refreshed[6] == bundle[6]
+    assert refreshed[7] == bundle[7]
 
 
 def test_high_risk_callback_pauses_then_approves_without_replaying_upstream(
@@ -71,6 +105,8 @@ def test_high_risk_callback_pauses_then_approves_without_replaying_upstream(
     assert paused.node_runs["validate_request"].attempt == 1
     assert paused.node_runs["risk_gate"].attempt == 1
     assert len(paused.human_reviews) == 1
+    assert "A person needs to decide" in paused_bundle[6]
+    assert "Waiting for a person" in paused_bundle[7]
 
     completed_bundle = app.submit_human_decision_ui(run_id, "APPROVE")
     completed = store.load(run_id)
@@ -80,6 +116,8 @@ def test_high_risk_callback_pauses_then_approves_without_replaying_upstream(
     assert completed.node_runs["risk_gate"].attempt == 1
     assert completed.node_runs["high_risk_finalize"].attempt == 1
     assert "COMPLETED" in completed_bundle[0]
+    assert "Completed after a person approved" in completed_bundle[6]
+    assert "Approved by a person" in completed_bundle[7]
 
 
 def test_evaluation_callback_returns_ten_passing_cases() -> None:
@@ -98,4 +136,14 @@ def test_missing_run_id_returns_safe_ui_message(tmp_path: Path, monkeypatch) -> 
 
     assert bundle[1] == "does-not-exist"
     assert "No persisted workflow run was found" in bundle[0]
-    assert bundle[2:] == ([], [], [], {})
+    assert bundle[2:6] == ([], [], [], {})
+    assert "Choose one story" in bundle[6]
+
+
+def test_unknown_story_returns_safe_explanation(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(app, "STATE_STORE", SQLiteStateStore(tmp_path / "unknown-story.db"))
+
+    bundle = app.run_story_ui("invented story")
+
+    assert "Choose one of the four demo stories" in bundle[0]
+    assert bundle[1] == ""
