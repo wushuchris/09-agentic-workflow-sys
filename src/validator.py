@@ -1,15 +1,15 @@
-"""Deterministic validation for workflow dependency graphs.
+"""Deterministic validation for workflow dependency graphs and decision routes.
 
 The schema layer validates the shape of workflow definitions. This module validates
-relationships between nodes: unique identifiers, dependency references, self-
-dependencies, and acyclicity.
+relationships between nodes: unique identifiers, dependency references, decision
+route targets, self-dependencies, and acyclicity.
 """
 
 from __future__ import annotations
 
 from heapq import heappop, heappush
 
-from src.schemas import WorkflowDefinition
+from src.schemas import NodeType, WorkflowDefinition
 
 
 class WorkflowValidationError(ValueError):
@@ -17,15 +17,11 @@ class WorkflowValidationError(ValueError):
 
 
 def validate_workflow(definition: WorkflowDefinition) -> None:
-    """Validate cross-node graph rules for a workflow definition.
-
-    Raises:
-        WorkflowValidationError: If node identifiers are duplicated, dependencies
-            are unknown, a node depends on itself, or the graph contains a cycle.
-    """
+    """Validate cross-node graph and deterministic routing rules."""
 
     _validate_unique_node_ids(definition)
     _validate_dependencies(definition)
+    _validate_decision_routes(definition)
     _topological_order(definition)
 
 
@@ -33,13 +29,14 @@ def topological_order(definition: WorkflowDefinition) -> list[str]:
     """Return a deterministic topological ordering after validating the workflow.
 
     When more than one node is ready, node identifiers are used as a stable
-    tie-breaker. The ordering is deterministic for testing and the MVP's future
-    sequential executor; it does not imply that production workflows must execute
-    independent nodes serially.
+    tie-breaker. The ordering is deterministic for testing and the MVP's sequential
+    executor; it does not imply that production workflows must execute independent
+    nodes serially.
     """
 
     _validate_unique_node_ids(definition)
     _validate_dependencies(definition)
+    _validate_decision_routes(definition)
     return _topological_order(definition)
 
 
@@ -71,6 +68,51 @@ def _validate_dependencies(definition: WorkflowDefinition) -> None:
                     f"node '{node.node_id}' depends on unknown node "
                     f"'{dependency_id}'"
                 )
+
+
+def _validate_decision_routes(definition: WorkflowDefinition) -> None:
+    node_by_id = {node.node_id: node for node in definition.nodes}
+
+    for decision in definition.nodes:
+        if decision.node_type is not NodeType.DECISION:
+            continue
+
+        route_targets = set(decision.routes.values())
+        for route_label, target_node_id in decision.routes.items():
+            target = node_by_id.get(target_node_id)
+            if target is None:
+                raise WorkflowValidationError(
+                    f"DECISION node '{decision.node_id}' route '{route_label}' targets "
+                    f"unknown node '{target_node_id}'"
+                )
+            if target_node_id == decision.node_id:
+                raise WorkflowValidationError(
+                    f"DECISION node '{decision.node_id}' cannot route to itself"
+                )
+            if decision.node_id not in target.depends_on:
+                raise WorkflowValidationError(
+                    f"route target '{target_node_id}' must directly depend on "
+                    f"DECISION node '{decision.node_id}'"
+                )
+
+        direct_dependents = {
+            node.node_id
+            for node in definition.nodes
+            if decision.node_id in node.depends_on
+        }
+        if direct_dependents != route_targets:
+            unrouted = sorted(direct_dependents - route_targets)
+            extra = sorted(route_targets - direct_dependents)
+            details: list[str] = []
+            if unrouted:
+                details.append(f"unrouted dependents: {', '.join(unrouted)}")
+            if extra:
+                details.append(f"invalid route targets: {', '.join(extra)}")
+            detail_text = "; ".join(details)
+            raise WorkflowValidationError(
+                f"DECISION node '{decision.node_id}' must route all direct dependents"
+                + (f" ({detail_text})" if detail_text else "")
+            )
 
 
 def _topological_order(definition: WorkflowDefinition) -> list[str]:
