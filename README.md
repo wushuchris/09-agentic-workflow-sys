@@ -74,6 +74,14 @@ The demo contains no real clients, accounts, trades, KYC/AML service calls, mone
 
 All names and facts are synthetic.
 
+## 60-Second Demo Walkthrough
+
+A useful way to explain the project is:
+
+> Think of this as an operations workflow dashboard. A fictional wealth-management household enters onboarding. AI helps organize the unstructured intake, but it cannot control the workflow. Deterministic code checks the rules and decides the permitted path. Routine cases continue automatically, temporary failures retry safely, and exception cases pause for a human. The important pattern is: **AI contributes work, code governs consequences, and humans retain authority over consequential exceptions.**
+
+For a quick walkthrough, run the **Harbor Family — straightforward household** first to show the standard path, then run the **Redwood Family Trust — human review required** case to show where automation deliberately stops and hands authority to a person. The technical tabs underneath provide the evidence for the story: node state, bounded AI output, append-only events, retries, persistence, and human-review history.
+
 ## Where AI Is Implemented
 
 The `AI Intake Organizer` is the intentionally narrow model boundary.
@@ -285,4 +293,4 @@ tests/
 
 ## Status
 
-**Current phase:** The workflow engine, fictional wealth-management onboarding case, bounded AI intake work product, provider adapter, path visualization, deterministic routing explanation, evaluation harness, persistence, human review, CI, and GitHub → Hugging Face deployment pipeline are implemented. Live inference remains explicitly disabled until the Space is given a runtime inference token and the deployment opts in. Final live validation and portfolio closeout remain.
+**Complete — production validated.** Agent 9 now includes the deterministic workflow engine, fictional wealth-management onboarding dashboard, bounded AI intake work product, provider adapter, path visualization, deterministic routing explanation, persistence, bounded retries, human escalation, append-only audit history, idempotent resume behavior, a 10-case evaluation harness, a business-friendly Gradio interface, GitHub Actions CI, and automated GitHub → Hugging Face deployment. The final CI run passed **125 tests**, the public Space was validated across standard, retry, approve, reject, evaluation, and persisted-reload paths, and the GitHub → Hugging Face sync completed successfully. Live model inference remains an optional deployment enhancement rather than a requirement for the completed workflow pattern.
