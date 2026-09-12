@@ -46,7 +46,7 @@ EVENT_ICONS = {
 }
 
 APP_CSS = """
-.gradio-container { max-width:980px !important; margin:0 auto !important; }
+.gradio-container { max-width:1120px !important; margin:0 auto !important; }
 .agent-hero { padding:1.65rem 1.75rem; border:1px solid var(--border-color-primary,rgba(127,127,127,.25)); border-radius:22px; background:linear-gradient(135deg,rgba(249,115,22,.12),rgba(99,102,241,.08)); margin-bottom:1rem; }
 .agent-eyebrow,.outcome-eyebrow,.panel-eyebrow { font-size:.76rem; font-weight:800; letter-spacing:.12em; opacity:.72; margin-bottom:.35rem; }
 .agent-hero h1 { margin:.25rem 0 .55rem; font-size:2.12rem; line-height:1.16; max-width:820px; }
