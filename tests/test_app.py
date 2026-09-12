@@ -23,7 +23,7 @@ def test_gradio_app_builds_as_blocks() -> None:
 
 
 def test_business_presentation_is_centered_and_vertical() -> None:
-    assert "max-width:980px" in APP_CSS
+    assert "max-width:1120px" in APP_CSS
     assert "grid-template-columns:1fr" in APP_CSS
     assert "flex-direction:column" in APP_CSS
     assert "Humans retain authority over consequential exceptions" in PATTERN_HTML
