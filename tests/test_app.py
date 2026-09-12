@@ -13,12 +13,45 @@ os.environ["LIVE_AI_ENABLED"] = "false"
 
 import app  # noqa: E402
 
+from src.demo_presentation import APP_CSS, PATTERN_HTML  # noqa: E402
 from src.persistence import SQLiteStateStore  # noqa: E402
 from src.schemas import WorkflowStatus  # noqa: E402
 
 
 def test_gradio_app_builds_as_blocks() -> None:
     assert isinstance(app.demo, gr.Blocks)
+
+
+def test_business_presentation_is_centered_and_vertical() -> None:
+    assert "max-width:980px" in APP_CSS
+    assert "grid-template-columns:1fr" in APP_CSS
+    assert "flex-direction:column" in APP_CSS
+    assert "Humans retain authority over consequential exceptions" in PATTERN_HTML
+
+
+def test_stream_story_yields_live_activity_and_full_completed_trace(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store = SQLiteStateStore(tmp_path / "stream-story.db")
+    monkeypatch.setattr(app, "STATE_STORE", store)
+    monkeypatch.setattr(app, "playback_delay", lambda _event_type: 0)
+
+    frames = list(app.stream_story_ui("Harbor Family — straightforward household"))
+
+    assert len(frames) > 3
+    assert "RUNNING" in frames[0][0]
+    assert "Workflow engine is running" in frames[0][0]
+
+    final = frames[-1]
+    run_id = final[2]
+    run = store.load(run_id)
+
+    assert run.status is WorkflowStatus.COMPLETED
+    assert "activity-scroll" in final[0]
+    assert "Workflow event trace complete" in final[0]
+    assert final[0].count("activity-event") >= len(run.events)
+    assert "COMPLETED" in final[1]
 
 
 def test_one_click_standard_household_explains_ready_path(
