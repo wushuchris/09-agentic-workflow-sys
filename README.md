@@ -80,7 +80,7 @@ A useful way to explain the project is:
 
 > Think of this as an operations workflow dashboard. A fictional wealth-management household enters onboarding. AI helps organize the unstructured intake, but it cannot control the workflow. Deterministic code checks the rules and decides the permitted path. Routine cases continue automatically, temporary failures retry safely, and exception cases pause for a human. The important pattern is: **AI contributes work, code governs consequences, and humans retain authority over consequential exceptions.**
 
-For a quick walkthrough, run the **Harbor Family — straightforward household** first to show the standard path, then run the **Redwood Family Trust — human review required** case to show where automation deliberately stops and hands authority to a person. The technical tabs underneath provide the evidence for the story: node state, bounded AI output, append-only events, retries, persistence, and human-review history.
+For a quick walkthrough, run the **Harbor Family — straightforward household** first to show the standard path, then run the **Redwood Family Trust — human review required** case to show where automation deliberately stops and hands authority to a person. While each story runs, the **Live Workflow Activity** panel replays the real append-only workflow events from that exact run at a readable pace. The technical tabs underneath provide the evidence for the story: node state, bounded AI output, append-only events, retries, persistence, and human-review history.
 
 ## Where AI Is Implemented
 
@@ -153,13 +153,16 @@ The live provider output still passes through the same strict Pydantic boundary.
 
 The landing experience is designed for both non-technical and technical visitors. The top-level framing is deliberately that of an **operations workflow dashboard**: the visitor can see what the business process is doing, where AI contributed, why a case took a particular path, where recovery occurred, and when a person must intervene.
 
-After each run it shows, in this order:
+The presentation uses a centered **1120px operations-dashboard width**: wider than the later multi-agent demos because Agent 9 benefits from extra room for workflow state and controls, but still intentionally constrained so the page does not become a full-width engineering dashboard.
 
-1. **Plain-English business outcome** — what happened to the fictional onboarding case.
-2. **Live workflow path** — completed steps light up while the unused branch is muted; the AI node is visually highlighted.
-3. **Bounded AI work product** — live vs fallback source, profile category, intake summary, and whether the validated summary reached the simulated package.
-4. **Why did it route here?** — the exact deterministic exception reasons that selected the standard or human-review path, with an explicit statement that the AI summary did not choose the route.
-5. **Step-by-step journey** — a readable translation of node state, retry recovery, and human decisions.
+During and after each run it shows, in this order:
+
+1. **Live Workflow Activity** — a visible running state plus paced playback of the real append-only workflow events from that exact run; after completion the full transcript remains scrollable.
+2. **Plain-English business outcome** — what happened to the fictional onboarding case.
+3. **Workflow path** — completed steps light up while the unused branch is muted; the AI node is visually highlighted.
+4. **Bounded AI work product** — live vs fallback source, profile category, intake summary, and whether the validated summary reached the simulated package.
+5. **Why did it route here?** — the exact deterministic exception reasons that selected the standard or human-review path, with an explicit statement that the AI summary did not choose the route.
+6. **Step-by-step journey** — a readable translation of node state, retry recovery, and human decisions.
 
 Technical tabs preserve the underlying evidence: exact node state, structured outputs, append-only audit events, persisted human reviews, and the evaluation suite.
 
@@ -285,6 +288,7 @@ requirements.txt
 .gitignore
 .github/workflows/ci.yml
 src/
+  demo_presentation.py
   hf_provider.py
   model_assist.py
   ...
@@ -293,4 +297,4 @@ tests/
 
 ## Status
 
-**Complete — production validated.** Agent 9 now includes the deterministic workflow engine, fictional wealth-management onboarding dashboard, bounded AI intake work product, provider adapter, path visualization, deterministic routing explanation, persistence, bounded retries, human escalation, append-only audit history, idempotent resume behavior, a 10-case evaluation harness, a business-friendly Gradio interface, GitHub Actions CI, and automated GitHub → Hugging Face deployment. The final CI run passed **125 tests**, the public Space was validated across standard, retry, approve, reject, evaluation, and persisted-reload paths, and the GitHub → Hugging Face sync completed successfully. Live model inference remains an optional deployment enhancement rather than a requirement for the completed workflow pattern.
+**Complete — production validated.** Agent 9 now includes the deterministic workflow engine, fictional wealth-management onboarding dashboard, bounded AI intake work product, provider adapter, path visualization, deterministic routing explanation, persistence, bounded retries, human escalation, append-only audit history, idempotent resume behavior, a 10-case evaluation harness, a business-first Gradio interface with real workflow-event playback, GitHub Actions CI, and automated GitHub → Hugging Face deployment. The final suite passes **127 automated tests**, the public Space has passed human presentation review with a centered 1120px workflow-dashboard layout, visible paced workflow activity, and a complete scrollable event transcript, and the GitHub → Hugging Face sync completed successfully. Live model inference remains an optional deployment enhancement rather than a requirement for the completed workflow pattern.
